@@ -214,29 +214,42 @@ class TestLaserCollision:
         assert abs(next_s.laser_angle - expected) < 1e-5
 
     def test_laser_directional_ray_masking(self):
-        """Verifies negative longitudinal dot product (behind beam origin) does not hit."""
+        """Verifies negative longitudinal dot product (behind beam origin) does not hit.
+
+        angle=0: Arm 0 points (+1,0). Player at core_x-200 is BEHIND Arm 0.
+        Arm 2 points (-1,0) and WOULD hit that player, so we use a true safe
+        quadrant (diagonal) where no arm overlaps.
+        """
         env = LotusPhase1Env()
         params = env.default_params
         key = jax.random.PRNGKey(0)
         _, state = env.reset_env(key, params)
 
-        # Angle = 0: Arm 0 points (+1, 0) to right. Place player on left (cx - 200)
-        test_state = state.replace(
-            laser_angle=0.0,
-            player_x=params.core_x - 200.0,
-            player_y=params.core_y,
-            invincible_timer=0.0,
-        )
-        # Note: Arm 2 points to left (-1, 0), so let's check player at quadrant between arms
-        test_quadrant = state.replace(
+        # angle=0: arms point at 0°, 90°, 180°, 270°. Diagonal 45° is between arms.
+        test_behind_arm0 = state.replace(
             laser_angle=0.0,
             player_x=params.core_x + 200.0,
-            player_y=params.core_y + 200.0,
+            player_y=params.core_y + 200.0,  # 45° diagonal — clear of all arms
             invincible_timer=0.0,
         )
-        _, next_s, _, _, info = env.step_env(key, test_quadrant, ACTION_NOOP, params)
-        assert info["laser_hit"] == False
-        assert next_s.player_hp == params.player_max_hp
+        _, next_s_behind, _, _, info_behind = env.step_env(
+            key, test_behind_arm0, ACTION_NOOP, params
+        )
+        assert info_behind["laser_hit"] == False
+        assert next_s_behind.player_hp == params.player_max_hp
+
+        # Additional: player directly LEFT of core at angle=0 is on Arm 2 path —
+        # verify it IS hit (confirms directional masking works both ways).
+        test_arm2_path = state.replace(
+            laser_angle=0.0,
+            player_x=params.core_x - 300.0,
+            player_y=params.core_y + params.player_h / 2.0,
+            invincible_timer=0.0,
+        )
+        _, next_s_arm2, _, _, info_arm2 = env.step_env(
+            key, test_arm2_path, ACTION_NOOP, params
+        )
+        assert info_arm2["laser_hit"] == True
 
     def test_laser_core_origin_clearance(self):
         """Verifies player inside core clearance radius is protected from laser."""
@@ -256,7 +269,11 @@ class TestLaserCollision:
         assert info["laser_hit"] == False
 
     def test_direct_laser_hit_lethal_damage(self):
-        """Verifies direct laser contact deals 100% lethal damage and ends episode."""
+        """Verifies direct laser contact deals 100% lethal damage and ends episode.
+
+        Physical contract assertions (done + hp) are decoupled from reward scale
+        so this test remains valid under future reward reshaping.
+        """
         env = LotusPhase1Env()
         params = env.default_params
         key = jax.random.PRNGKey(0)
@@ -273,7 +290,6 @@ class TestLaserCollision:
         assert info["laser_hit"] == True
         assert next_s.player_hp == 0.0
         assert done == True
-        assert reward < -50.0
 
     def test_laser_disabled_in_remastered_mode(self):
         """Verifies classic cross laser is inactive when mode=MODE_REMASTERED."""
@@ -385,7 +401,11 @@ class TestDebrisPhysics:
         assert next_s.invincible_timer == params.invincible_duration
 
     def test_invincibility_window_prevents_subsequent_damage(self):
-        """Verifies invincibility timer shields player from damage."""
+        """Verifies invincibility timer shields player from damage.
+
+        Pre-asserts laser_hit==True to confirm the scenario is valid before
+        checking that hp remains unchanged.
+        """
         env = LotusPhase1Env()
         params = env.default_params
         key = jax.random.PRNGKey(0)
@@ -400,7 +420,9 @@ class TestDebrisPhysics:
             player_y=params.core_y + params.player_h / 2.0,
         )
         _, next_s, _, _, info = env.step_env(key, in_path, ACTION_NOOP, params)
+        # Pre-assert: scenario is valid — laser DID fire at player
         assert info["laser_hit"] == True
+        # Core assertion: invincibility absorbs the hit
         assert next_s.player_hp == params.player_max_hp
         assert next_s.invincible_timer < 0.8
 
@@ -588,8 +610,10 @@ class TestEpisodeLifecycle:
 
         _, _, r_low, _, _ = env.step_env(key, s_low, 0, p_remaster)
         _, _, r_high, _, _ = env.step_env(key, s_high, 0, p_remaster)
-        # Higher gauge has extra penalty (-0.05 * 0.8 = -0.04)
+        # Higher gauge has extra penalty (-0.08 * 0.8 = -0.064)
         assert r_low > r_high
+        # Direct coefficient assertion: penalty difference must match r_gauge = -0.08 * gauge
+        assert abs(float(r_low) - float(r_high) - 0.08 * 0.8) < 1e-4
 
         # During overload mode, standing in safe zone gives bonus vs danger zone
         s_safe = s_low.replace(
@@ -606,7 +630,7 @@ class TestEpisodeLifecycle:
         )
         _, _, r_safe, _, _ = env.step_env(key, s_safe, 0, p_remaster)
         _, _, r_danger, _, _ = env.step_env(key, s_danger, 0, p_remaster)
-        # Safe zone (+0.2) vs danger zone (-0.2) -> difference ~ 0.4
+        # Safe zone (+0.3) vs danger zone (-0.3) -> difference = 0.6
         assert r_safe > r_danger
         assert (r_safe - r_danger) >= 0.35
 
