@@ -1,0 +1,79 @@
+{
+  "map_width": 1366.0,
+  "map_height": 768.0,
+  "core_x": 683.0,
+  "core_y": 384.0,
+  "core_radius": 120.0,
+  "floor_y": 605.0,
+  "wall_left": 50.0,
+  "wall_right": 1316.0,
+  "safe_zone_x": 1150.0,
+  "player_width": 40.0,
+  "player_height": 60.0,
+  "player_speed": 400.0,
+  "player_jump_impulse": -650.0,
+  "gravity": 1800.0,
+  "dt": 0.016666666666666666,
+  "classic_laser": {
+    "angular_velocity": 0.523598775,
+    "beam_thickness": 20.0,
+    "beam_count": 4,
+    "damage": 1.0
+  },
+  "debris_params": {
+    "max_debris": 30,
+    "spawn_interval_ticks": 15,
+    "types": [
+      {
+        "type_id": 0,
+        "radius": 15.0,
+        "damage": 0.1,
+        "stun_duration": 1.0,
+        "fall_speed": 300.0
+      },
+      {
+        "type_id": 1,
+        "radius": 25.0,
+        "damage": 0.2,
+        "stun_duration": 1.5,
+        "fall_speed": 350.0
+      },
+      {
+        "type_id": 2,
+        "radius": 35.0,
+        "damage": 0.3,
+        "stun_duration": 2.0,
+        "fall_speed": 400.0
+      },
+      {
+        "type_id": 3,
+        "radius": 50.0,
+        "damage": 0.4,
+        "stun_duration": 2.5,
+        "fall_speed": 450.0
+      }
+    ]
+  },
+  "remastered_params": {
+    "enabled": true,
+    "difficulty": "normal",
+    "gauge_natural_rates": {
+      "normal": 0.006,
+      "hard": 0.008,
+      "extreme": 0.02
+    },
+    "overload_duration": 25.0,
+    "bombardment_damage": 1.0,
+    "bombardment_tick_rate": 0.5,
+    "electric_field_damage": 0.05,
+    "electric_field_tick_rate": 0.36,
+    "tracking_laser_player_damage": 0.15,
+    "tracking_laser_gauge_increase": 0.1,
+    "tracking_laser_gauge_decrease": 0.1,
+    "small_arm_player_damage": 0.05,
+    "small_arm_gauge_increase": 0.03,
+    "small_arm_gauge_decrease": 0.03,
+    "floor_discharge_warning_duration": 1.2,
+    "floor_discharge_damage": 1.0
+  }
+}
