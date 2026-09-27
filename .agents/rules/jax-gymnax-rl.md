@@ -28,3 +28,8 @@ When implementing or modifying JAX-accelerated simulation environments:
 5. **Pure Inlined Modular Helpers**:
    - Keep `step_env` concise by extracting discrete physical steps into pure, undecorated Python functions.
    - Pure functions called inside `step_env` are seamlessly inlined by XLA without runtime tracing overhead.
+
+6. **Orbax & Host Checkpointing Invariants**:
+   - Reserve `jax.debug.callback` strictly for non-blocking host telemetry and metric printing; do not dispatch async disk checkpointing inside callback worker threads.
+   - Always save Orbax checkpoints with `force=True` to allow safe overwriting.
+   - Explicitly call `checkpointer.wait_until_finished()` and `checkpointer.close()` before process exit to prevent interpreter shutdown race conditions.

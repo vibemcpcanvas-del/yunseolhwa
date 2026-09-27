@@ -14,6 +14,7 @@ dependencies = [
     "flashbax",
     "chex",
     "optax",
+    "orbax-checkpoint",
     "jsonschema>=4.20.0",
     "pytest>=8.0.0",
 ]
