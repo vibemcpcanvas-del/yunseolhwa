@@ -89,7 +89,7 @@ Checkpoints will be automatically committed every 50 updates into `checkpoints/m
 
 ```bash
 # Run trained checkpoint at 60 FPS
-python view_policy.py --checkpoint_path checkpoints/mode_1/step_300 --mode 1
+python view_policy.py --checkpoint_path checkpoints/mode_1/step_500 --mode 1
 
 # Or test with random policy (dry-run)
 python view_policy.py --random --mode 1
