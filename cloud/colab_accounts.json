@@ -1,0 +1,40 @@
+{
+  "active_id": "account_1",
+  "accounts": [
+    {
+      "id": "account_1",
+      "name": "구글 메인 계정",
+      "status": "READY",
+      "updated_at": "2026-09-24 20:19:53",
+      "last_error": null
+    },
+    {
+      "id": "account_2",
+      "name": "구글 계정 2",
+      "status": "READY",
+      "updated_at": "2026-09-20 18:33:41",
+      "last_error": null
+    },
+    {
+      "id": "account_3",
+      "name": "구글 계정 3",
+      "status": "READY",
+      "updated_at": "2026-09-20 18:33:41",
+      "last_error": null
+    },
+    {
+      "id": "account_4",
+      "name": "구글 계정 4",
+      "status": "READY",
+      "updated_at": "2026-09-20 18:33:41",
+      "last_error": null
+    },
+    {
+      "id": "account_5",
+      "name": "구글 계정 5",
+      "status": "QUOTA_EXHAUSTED",
+      "updated_at": "2026-09-24 20:19:33",
+      "last_error": "503 Quota Exhausted"
+    }
+  ]
+}

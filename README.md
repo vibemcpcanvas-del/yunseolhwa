@@ -85,7 +85,19 @@ python train_ppo.py --mode 1 --num_envs 2048 --num_steps 64 --update_epochs 2 --
 
 Checkpoints will be automatically committed every 50 updates into `checkpoints/mode_1/step_<N>`.
 
-### 4. Interactive Policy Viewer
+### 4. Cloud Burst Training on Colab TPU / GPU (1M+ SPS Target)
+
+```bash
+# Launch high-throughput TPU training (16,384 concurrent environments, bfloat16 hybrid precision)
+python run_colab_train.py --accelerator tpu --tpu_type v5e1 --mode 1 --num_envs 16384 --num_updates 300
+
+# Or launch on Tesla T4 GPU (4,096 environments) with 5-account quota auto-rotation
+python run_colab_train.py --accelerator gpu --gpu_type T4 --mode 1 --num_envs 4096 --num_updates 300
+```
+
+Intermediate Orbax checkpoints are streamed live over Cloudflare Quick Tunnel back to `checkpoints/mode_1/step_<N>`.
+
+### 5. Interactive Policy Viewer
 
 ```bash
 # Run trained checkpoint at 60 FPS

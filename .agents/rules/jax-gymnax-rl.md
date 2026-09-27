@@ -52,3 +52,9 @@ When implementing or modifying JAX-accelerated simulation environments:
 9. **Chunked Outer Scan & Unbuffered Telemetry**:
    - **Chunked Outer Scan Pattern**: For long-horizon RL training (hundreds to thousands of updates), do not compile the entire run into a single monolithic `jax.lax.scan`. Decouple into `(init_fn, update_chunk_fn)` via `make_train_step` and run an outer Python loop over chunks (e.g. 50 updates). Synchronize via `jax.block_until_ready` and persist Orbax checkpoints at the end of every chunk to protect against OOMs, hardware crashes, and process interruption.
    - **Unbuffered Host Telemetry**: All console prints inside asynchronous host callbacks (`jax.debug.callback`) MUST explicitly specify `flush=True` (e.g. `print(..., flush=True)`). This guarantees immediate progress visibility across Windows background tasks, piped CLI runners, and subagent process monitoring without buffering delays.
+
+10. **Colab Accelerator Portability & Cloud Burst Invariants (TPU/GPU Hybrid Scaling)**:
+   - **Physical Simulation `float32` Guarantee**: `EnvParams` and `EnvState` coordinate calculations, SAT collision projections, and jump velocities must remain strictly in `float32` across all accelerators (TPU/GPU/CPU) to prevent sub-pixel collision rounding drift.
+   - **Actor-Critic Hybrid Precision**: Policy and Value networks should use `dtype=bfloat16` compute with `param_dtype=float32` and `float32` logit/value output heads to maximize TPU Matrix Multiply Units (MXUs) and Tensor Core throughput without probability distribution or GAE instability.
+   - **Ephemeral Preemption Protection**: Cloud accelerator jobs dispatched via ephemeral runtimes (such as Google Colab CLI) must utilize live chunk callbacks (`--on_checkpoint_cmd`) to stream intermediate Orbax weights to host persistence storage at every chunk completion, protecting against VM quota timeouts and spot preemption.
+

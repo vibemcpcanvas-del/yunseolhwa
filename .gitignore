@@ -56,3 +56,10 @@ checkpoints/
 *.png
 !assets/*.gif
 !assets/*.png
+
+# Cloud archives and tunnel binary
+cloud/*.tar
+cloud/*.part
+cloud/*.chunks/
+bin/cloudflared.exe
+

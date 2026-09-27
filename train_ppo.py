@@ -60,6 +60,9 @@ class PPOConfig:
     log_interval: int = 1
     checkpoint_interval: int = 50
     checkpoint_dir: str = "checkpoints"
+    dtype: str = "float32"
+    param_dtype: str = "float32"
+    on_checkpoint_cmd: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -67,26 +70,35 @@ class PPOConfig:
 # ---------------------------------------------------------------------------
 
 class ActorCritic(nn.Module):
-    """Two-headed Actor-Critic MLP with separate representation pathways."""
+    """Two-headed Actor-Critic MLP with separate representation pathways and hybrid precision support."""
     action_dim: int
+    dtype: Any = jnp.float32
+    param_dtype: Any = jnp.float32
 
     @nn.compact
     def __call__(self, x: chex.Array) -> Tuple[chex.Array, chex.Array]:
+        x = x.astype(self.dtype)
         # Actor Network (Policy Head)
         actor = nn.Dense(
             256,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
             kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)),
             bias_init=nn.initializers.constant(0.0),
         )(x)
         actor = nn.tanh(actor)
         actor = nn.Dense(
             256,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
             kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)),
             bias_init=nn.initializers.constant(0.0),
         )(actor)
         actor = nn.tanh(actor)
         actor_logits = nn.Dense(
             self.action_dim,
+            dtype=jnp.float32,
+            param_dtype=self.param_dtype,
             kernel_init=nn.initializers.orthogonal(0.01),
             bias_init=nn.initializers.constant(0.0),
         )(actor)
@@ -94,23 +106,30 @@ class ActorCritic(nn.Module):
         # Critic Network (Value Head)
         critic = nn.Dense(
             256,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
             kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)),
             bias_init=nn.initializers.constant(0.0),
         )(x)
         critic = nn.tanh(critic)
         critic = nn.Dense(
             256,
+            dtype=self.dtype,
+            param_dtype=self.param_dtype,
             kernel_init=nn.initializers.orthogonal(jnp.sqrt(2)),
             bias_init=nn.initializers.constant(0.0),
         )(critic)
         critic = nn.tanh(critic)
         value = nn.Dense(
             1,
+            dtype=jnp.float32,
+            param_dtype=self.param_dtype,
             kernel_init=nn.initializers.orthogonal(1.0),
             bias_init=nn.initializers.constant(0.0),
         )(critic)
 
         return actor_logits, jnp.squeeze(value, axis=-1)
+
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +238,9 @@ def make_train_step(
     else:
         lr_schedule = config.lr
 
-    network = ActorCritic(action_dim=action_dim)
+    compute_dtype = jnp.bfloat16 if config.dtype == "bfloat16" else jnp.float32
+    param_dtype = jnp.float32
+    network = ActorCritic(action_dim=action_dim, dtype=compute_dtype, param_dtype=param_dtype)
     tx = optax.chain(
         optax.clip_by_global_norm(config.max_grad_norm),
         optax.adam(learning_rate=lr_schedule, eps=1e-5),
@@ -589,6 +610,10 @@ def parse_args() -> PPOConfig:
     parser.add_argument("--checkpoint_interval", type=int, default=50,
                         help="Checkpoint frequency (chunk size for outer python loop)")
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints", help="Orbax save directory")
+    parser.add_argument("--dtype", type=str, default="float32", choices=["float32", "bfloat16"],
+                        help="Neural network compute precision (float32 or bfloat16)")
+    parser.add_argument("--on_checkpoint_cmd", type=str, default=None,
+                        help="Command/script to execute on checkpoint commit (supports {step} and {step_dir})")
     parser.add_argument("--eval_steps", type=int, default=1200, help="Evaluation rollout steps")
 
     args = parser.parse_args()
@@ -612,6 +637,8 @@ def parse_args() -> PPOConfig:
         log_interval=args.log_interval,
         checkpoint_interval=args.checkpoint_interval,
         checkpoint_dir=args.checkpoint_dir,
+        dtype=args.dtype,
+        on_checkpoint_cmd=args.on_checkpoint_cmd,
     )
 
 
@@ -623,7 +650,8 @@ def main():
     print(f"MapleStory Lotus Phase 1 PPO Training ({mode_name} Mode, mode={config.mode})")
     print(f"Hardware Backend: {jax.default_backend()} | Devices: {jax.devices()}")
     print(f"Parallel Envs: {config.num_envs:,} | Rollout Steps: {config.num_steps} | Updates: {config.num_updates}")
-    print(f"Epochs/Batch: {config.update_epochs} | Chunk Size (Checkpoint Interval): {config.checkpoint_interval}")
+    print(f"Precision: compute={config.dtype}, param={config.param_dtype} | Epochs/Batch: {config.update_epochs}")
+    print(f"Chunk Size (Checkpoint Interval): {config.checkpoint_interval}")
     print(f"Total Step Budget: {config.num_envs * config.num_steps * config.num_updates:,} environment steps")
     print("=" * 76)
 
@@ -654,8 +682,15 @@ def main():
         current_step += this_chunk
 
         # Automatic checkpoint saving at every chunk completion
-        save_checkpoint_orbax(runner_state.train_state.params, config, current_step)
-        print(f"[Loop Progress] Completed {current_step}/{num_updates} updates (Checkpoint saved)")
+        step_dir = save_checkpoint_orbax(runner_state.train_state.params, config, current_step)
+        print(f"[Loop Progress] Completed {current_step}/{num_updates} updates (Checkpoint saved)", flush=True)
+
+        if config.on_checkpoint_cmd:
+            try:
+                cmd_to_run = config.on_checkpoint_cmd.format(step=current_step, step_dir=step_dir)
+                subprocess.run(cmd_to_run, shell=True, check=False)
+            except Exception as cb_err:
+                print(f"[!] on_checkpoint_cmd warning: {cb_err}", flush=True)
 
     total_time = time.perf_counter() - t0
     total_sim_steps = config.num_envs * config.num_steps * config.num_updates
