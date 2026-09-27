@@ -49,3 +49,8 @@ htmlcov/
 *~
 .DS_Store
 Thumbs.db
+
+# Checkpoints and media artifacts
+checkpoints/
+*.gif
+*.png

@@ -24,6 +24,10 @@ When implementing or modifying JAX-accelerated simulation environments:
 4. **Reward Design & Anti-Reward-Hacking**:
    - Avoid proximity-based reward shaping near lethal hazards to prevent reward hacking.
    - Shape rewards around game-theoretic survival, resource suppression (e.g. boss rage/security gauges), and safe-zone positioning during lethal phases.
+   - **Passive Survival Dominance Check**: Ensure base survival reward per step (`r_base + r_hp`) does not dominate the total expected reward budget to the point where risk-avoidant camping (wall-hugging, corner-hiding) becomes the globally optimal strategy. The per-step passive income should be << single gimmick event reward.
+   - **Boundary Exploitation Audit**: When hazard spawn zones have bounded coordinate ranges (e.g. `debris x ∈ [wall_left+50, wall_right-50]`), verify that arena boundaries outside the spawn range do not create zero-risk camping spots. Add explicit wall-proximity penalties or expand spawn ranges to cover the full playable area.
+   - **Gimmick Reward Scaling**: For multi-step gimmick chains (e.g. lure tracking laser → dodge → laser hits boss), ensure the total gimmick reward substantially exceeds the worst-case damage penalty for a failed attempt. A ratio of ≥ 0.5:1 (gimmick reward : damage penalty) is recommended to make exploration NPV-positive.
+   - **Contextual Penalty Gating**: Wall/boundary penalties must be disabled during phases where boundary-camping IS the correct strategy (e.g. Overload safe-zone at x≥1150).
 
 5. **Pure Inlined Modular Helpers**:
    - Keep `step_env` concise by extracting discrete physical steps into pure, undecorated Python functions.

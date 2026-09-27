@@ -472,43 +472,86 @@ def _compute_reward(
     is_overload_next: chex.Array,
     px_next: chex.Array,
     hp_next: chex.Array,
+    tl_state: chex.Array,
+    tl_lock_x: chex.Array,
     params: EnvParams,
 ) -> chex.Array:
-    """Computes shaped reward aligned with survival, gauge management, and safe zone positioning.
+    """Computes shaped reward for Remastered gimmick-oriented play.
 
-    Prevents reward hacking (e.g. proximity farming near laser) by strictly rewarding:
-    - Base survival: +0.1 per step
-    - Hit penalty: -100.0 on damage
-    - Boss friendly fire guidance: +10.0 when tracking laser hits boss
-    - Shield shatter: +5.0 when boss shield breaks
+    Reward philosophy (v2): Shift agent strategy from passive wall-camping to
+    active Friendly Fire exploitation.  Reduces base survival dominance and
+    penalises wall-hugging outside of overload phases.
+
+    Components:
+    - Base survival: +0.03 per step (reduced from +0.1 to lower passive income)
+    - Hit penalty: -100.0 on any damage
+    - Friendly Fire boss hit: +50.0 (boosted from +10; primary learning signal)
+    - Shield shatter:        +30.0 (boosted from +5; milestone event)
     - Overload penalty: -20.0 when security gauge reaches 100%
-    - Anti-overload gauge suppression: -0.05 * gauge_final (penalizes gauge accumulation)
-    - Safe zone positioning during Overload: +0.2 in safe zone, -0.2 in danger zone
-    - Health preservation bonus: +0.05 * (hp_next / player_max_hp)
+    - Anti-overload gauge suppression: -0.08 * gauge_final (stronger)
+    - Safe zone positioning during Overload: +0.3 / -0.3
+    - Health preservation bonus: +0.02 * (hp_next / player_max_hp)
+    - Wall proximity penalty: -0.15 per step when |player_x - wall| < 150
+      (disabled during overload, where wall-right camping IS correct)
+    - Tracking laser bait shaping: +0.08 when tracking laser is in TRACKING
+      state and the lock-x is within boss core hit window (guides baiting)
     """
     is_remastered_or_hybrid = params.mode != MODE_CLASSIC
 
-    r_base = 0.1
+    # --- Core Survival ---
+    r_base = 0.03
     r_hit = jnp.where(took_hit, -100.0, 0.0)
-    r_boss_hit = jnp.where(laser_hits_boss, 10.0, 0.0)
-    r_shield = jnp.where(shield_shatter, 5.0, 0.0)
+    r_hp = 0.02 * (hp_next / params.player_max_hp)
+
+    # --- Friendly Fire Gimmick (primary learning signal) ---
+    r_boss_hit = jnp.where(laser_hits_boss, 50.0, 0.0)
+    r_shield = jnp.where(shield_shatter, 30.0, 0.0)
+
+    # --- Gauge & Overload Management ---
     r_overload = jnp.where(triggers_overload, -20.0, 0.0)
+    r_gauge = jnp.where(is_remastered_or_hybrid, -0.08 * gauge_final, 0.0)
 
-    # Anti-reward-hacking shaping: Gauge management (penalize higher security gauge)
-    r_gauge = jnp.where(is_remastered_or_hybrid, -0.05 * gauge_final, 0.0)
-
-    # Safe zone positioning shaping during overload mode
+    # Safe zone positioning during overload (stronger signal)
     in_safe_zone = px_next >= params.safe_zone_x
     r_safe_zone = jnp.where(
         is_overload_next & is_remastered_or_hybrid,
-        jnp.where(in_safe_zone, 0.2, -0.2),
+        jnp.where(in_safe_zone, 0.3, -0.3),
         0.0,
     )
 
-    # Health preservation bonus
-    r_hp = 0.05 * (hp_next / params.player_max_hp)
+    # --- Anti-Wall-Camping Penalty ---
+    # Penalise hugging left/right walls outside of overload phases.
+    # During overload the agent SHOULD camp near the right wall (safe zone).
+    wall_margin = 150.0
+    near_left_wall = px_next < (params.wall_left + wall_margin)
+    near_right_wall = px_next > (params.wall_right - wall_margin)
+    near_any_wall = near_left_wall | near_right_wall
+    r_wall = jnp.where(
+        near_any_wall & (~is_overload_next) & is_remastered_or_hybrid,
+        -0.15,
+        0.0,
+    )
 
-    return r_base + r_hit + r_boss_hit + r_shield + r_overload + r_gauge + r_safe_zone + r_hp
+    # --- Tracking Laser Bait Shaping ---
+    # When the tracking laser is in TRACKING state (1), reward the player if
+    # the lock-x is converging toward the boss core hit window.
+    # Boss core hit window: [core_x - boss_w/2, core_x + boss_w/2]
+    boss_left = params.core_x - params.boss_w / 2.0
+    boss_right = params.core_x + params.boss_w / 2.0
+    lock_in_boss_window = (tl_lock_x >= boss_left) & (tl_lock_x <= boss_right)
+    is_tracking = tl_state == 1
+    r_bait = jnp.where(
+        is_tracking & lock_in_boss_window & is_remastered_or_hybrid,
+        0.08,
+        0.0,
+    )
+
+    return (
+        r_base + r_hit + r_hp
+        + r_boss_hit + r_shield
+        + r_overload + r_gauge + r_safe_zone
+        + r_wall + r_bait
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -604,7 +647,7 @@ class LotusPhase1Env(environment.Environment):
             electric_floor_active=rm["electric_floor_active_next"],
         )
 
-        # 8. Aligned Shaped Reward
+        # 8. Aligned Shaped Reward (v2: anti-wall-camping + gimmick-oriented)
         reward = _compute_reward(
             took_hit,
             rm["laser_hits_boss"],
@@ -614,6 +657,8 @@ class LotusPhase1Env(environment.Environment):
             rm["is_overload_next"],
             px_next,
             hp_next,
+            rm["tl_state_next"],
+            rm["tl_lock_x_next"],
             params,
         )
 
