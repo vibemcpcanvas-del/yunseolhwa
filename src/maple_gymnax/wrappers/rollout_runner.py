@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 
 from maple_gymnax.envs.lotus_phase1 import EnvParams
+from maple_gymnax.wrappers.flatten_obs import FlattenObservationWrapper
 
 
 # Default random uniform policy for benchmarking / debugging
@@ -52,16 +53,27 @@ class RolloutRunner:
             action = policy(prev_obs, state, act_key)
             obs, next_state, reward, done, info = step_fn(step_key, state, action, self.params)
             transition = {
-                "obs": obs,
+                "obs": prev_obs,
                 "action": action,
                 "reward": reward,
                 "done": done,
+                "info": info,
             }
             return (key, next_state, obs), transition
 
-        # Get initial observation for first policy call
-        reset_fn = self.env.reset if hasattr(self.env, "reset") else self.env.reset_env
-        init_obs = reset_fn(rng, self.params)[0]
+        # Compute initial observation directly from initial_state (eliminates disconnected reset)
+        if hasattr(self.env, "get_observation"):
+            init_obs = self.env.get_observation(initial_state, self.params)
+        elif hasattr(self.env, "get_obs"):
+            init_obs = self.env.get_obs(initial_state, self.params)
+        else:
+            raise AttributeError(
+                "RolloutRunner.run requires env.get_observation or env.get_obs "
+                "to compute the initial observation from initial_state."
+            )
+
+        if isinstance(self.env, FlattenObservationWrapper):
+            init_obs = init_obs.reshape(-1)
 
         (final_key, final_state, _), traj = jax.lax.scan(
             _step, (rng, initial_state, init_obs), None, length=num_steps

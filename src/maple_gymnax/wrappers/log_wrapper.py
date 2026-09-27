@@ -107,3 +107,13 @@ class LogWrapper:
         params: EnvParams,
     ) -> Tuple[chex.Array, LogEnvState, float, bool, Dict[str, Any]]:
         return self.step(key, state, action, params)
+
+    def get_observation(self, state: Any, params: EnvParams) -> chex.Array:
+        env_state = getattr(state, "env_state", state)
+        get_obs_fn = getattr(self._env, "get_observation", getattr(self._env, "get_obs", None))
+        if get_obs_fn is None:
+            raise AttributeError("Underlying environment has no get_observation or get_obs")
+        return get_obs_fn(env_state, params)
+
+    def get_obs(self, state: Any, params: EnvParams) -> chex.Array:
+        return self.get_observation(state, params)

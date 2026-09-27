@@ -634,3 +634,32 @@ class TestEpisodeLifecycle:
         assert r_safe > r_danger
         assert (r_safe - r_danger) >= 0.35
 
+    def test_boss_hit_reward_is_single_event_not_per_tick(self):
+        """P0 회귀: 발사 지속 30틱 동안 전체 reward의 boss_hit 성분 합계가 정확히 50.0이어야 한다."""
+        env = LotusPhase1Env()
+        params = env.default_params.replace(mode=MODE_REMASTERED)
+        key = jax.random.PRNGKey(0)
+        _, state = env.reset_env(key, params)
+
+        # FIRING 진입 직전 상태로 설정: TRACKING(1) 상태, 타이머 0 임박, lock_x가 보스 판정 구간
+        boss_center = params.core_x
+        setup_state = state.replace(
+            tracking_laser_state=1,
+            tracking_laser_timer=0.001,
+            tracking_laser_lock_x=boss_center,
+            shield_active=True,
+            boss_shield=params.boss_shield_max,
+        )
+
+        total_boss_hit_reward = 0.0
+        cur = setup_state
+        for _ in range(35):  # FIRING 지속시간(0.5s=30틱)보다 넉넉히
+            key, subk = jax.random.split(key)
+            obs, cur, reward, done, info = env.step_env(subk, cur, 0, params)
+            if info["boss_hit_event"]:
+                total_boss_hit_reward += 50.0
+
+        assert total_boss_hit_reward == 50.0, (
+            f"보스 적중 보상이 1회성이 아닙니다: 누적 {total_boss_hit_reward}"
+        )
+

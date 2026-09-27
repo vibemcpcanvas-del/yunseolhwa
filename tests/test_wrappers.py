@@ -143,6 +143,25 @@ class TestRolloutRunner:
         assert traj["done"].shape == (num_steps,)
         assert final_state.time == num_steps
 
+    def test_rollout_runner_first_obs_matches_initial_state(self):
+        """RolloutRunner의 첫 관측이 전달된 initial_state에서 파생되어야 한다."""
+        env = LotusPhase1Env()
+        params = EnvParams()
+        key = jax.random.PRNGKey(0)
+        _, distinct_state = env.reset_env(key, params)
+
+        # initial_state를 명백히 구분되는 값으로 설정
+        custom_state = distinct_state.replace(player_x=999.0, player_hp=42.0)
+        expected_obs = env.get_obs(custom_state, params)
+
+        runner = RolloutRunner(env, params)
+        diff_key = jax.random.PRNGKey(777)  # run()에 전달되는 키는 initial_state와 무관해야 함
+        _, traj = runner.run(diff_key, custom_state, num_steps=1)
+
+        assert jnp.allclose(traj["obs"][0], expected_obs), (
+            "첫 관측이 initial_state가 아닌 별도 reset에서 생성되었습니다."
+        )
+
 
 class TestFlashbaxAdapter:
     """Validates Flashbax buffer storage and uniform sampling."""

@@ -61,3 +61,14 @@ class FlattenObservationWrapper:
         low = float(jnp.min(orig_space.low))
         high = float(jnp.max(orig_space.high))
         return spaces.Box(low=low, high=high, shape=(flat_dim,), dtype=jnp.float32)
+
+    def get_observation(self, state: Any, params: EnvParams) -> chex.Array:
+        env_state = state.env_state if hasattr(state, "env_state") else state
+        get_obs_fn = getattr(self._env, "get_observation", getattr(self._env, "get_obs", None))
+        if get_obs_fn is None:
+            raise AttributeError("Underlying environment has no get_observation or get_obs")
+        obs = get_obs_fn(env_state, params)
+        return obs.reshape(-1)
+
+    def get_obs(self, state: Any, params: EnvParams) -> chex.Array:
+        return self.get_observation(state, params)

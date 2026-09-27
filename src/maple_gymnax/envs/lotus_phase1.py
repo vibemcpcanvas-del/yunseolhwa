@@ -296,7 +296,8 @@ def _step_remastered_mechanics(
     params: EnvParams,
 ) -> Dict[str, Any]:
     """Pure functional Remastered Lotus mechanics (Tracking Laser FSM, Boss Shield, Gauge, Overload, Electric Floor)."""
-    is_remastered_or_hybrid = params.mode != MODE_CLASSIC
+    is_remastered_or_hybrid = jnp.bool_(params.mode != MODE_CLASSIC)
+    is_classic = jnp.bool_(params.mode == MODE_CLASSIC)
     gain_rate = jnp.where(is_remastered_or_hybrid, params.gauge_gain_rate, 0.0)
 
     # 1. Tracking Laser FSM: 0: IDLE (cooldown), 1: TRACKING (aiming), 2: FIRING (locked)
@@ -306,7 +307,7 @@ def _step_remastered_mechanics(
     firing_to_idle = (state.tracking_laser_state == 2) & (tl_timer_dec <= 0.0) & is_remastered_or_hybrid
 
     tl_state_next = jnp.where(
-        ~is_remastered_or_hybrid,
+        is_classic,
         state.tracking_laser_state,
         jnp.where(
             idle_to_tracking,
@@ -320,7 +321,7 @@ def _step_remastered_mechanics(
     )
 
     tl_timer_next = jnp.where(
-        ~is_remastered_or_hybrid,
+        is_classic,
         state.tracking_laser_timer,
         jnp.where(
             idle_to_tracking,
@@ -341,7 +342,8 @@ def _step_remastered_mechanics(
     )
 
     # Collision evaluation during FIRING state
-    is_firing = (state.tracking_laser_state == 2) & is_remastered_or_hybrid
+    is_firing = (tl_state_next == 2) & is_remastered_or_hybrid
+    just_entered_firing = tracking_to_firing
     boss_left = params.core_x - params.boss_w / 2.0
     boss_right = params.core_x + params.boss_w / 2.0
     laser_hits_boss = is_firing & (state.tracking_laser_lock_x >= boss_left) & (state.tracking_laser_lock_x <= boss_right)
@@ -356,9 +358,11 @@ def _step_remastered_mechanics(
     shield_active_next = jnp.where(shield_shatter, False, state.shield_active)
 
     # Gauge delta from friendly fire
+    gated_hits_boss = laser_hits_boss & tracking_to_firing
+    gated_hits_player = laser_hits_player & tracking_to_firing
     gauge_delta = (
-        jnp.where(laser_hits_player, params.tracking_laser_gauge_gain, 0.0)
-        - jnp.where(laser_hits_boss, params.tracking_laser_gauge_reduction, 0.0)
+        jnp.where(gated_hits_player, params.tracking_laser_gauge_gain, 0.0)
+        - jnp.where(gated_hits_boss, params.tracking_laser_gauge_reduction, 0.0)
     )
 
     gauge_accum = state.security_gauge + gain_rate * params.dt + gauge_delta
@@ -417,6 +421,7 @@ def _step_remastered_mechanics(
         "tl_lock_x_next": tl_lock_x_next,
         "laser_hits_boss": laser_hits_boss,
         "laser_hits_player": laser_hits_player,
+        "just_entered_firing": just_entered_firing,
         "shield_shatter": shield_shatter,
         "boss_shield_next": boss_shield_next,
         "shield_active_next": shield_active_next,
@@ -648,9 +653,10 @@ class LotusPhase1Env(environment.Environment):
         )
 
         # 8. Aligned Shaped Reward (v2: anti-wall-camping + gimmick-oriented)
+        gated_boss_hit = rm["laser_hits_boss"] & rm["just_entered_firing"]
         reward = _compute_reward(
             took_hit,
-            rm["laser_hits_boss"],
+            gated_boss_hit,
             rm["shield_shatter"],
             rm["triggers_overload"],
             rm["gauge_final"],
@@ -675,6 +681,8 @@ class LotusPhase1Env(environment.Environment):
             "hp": hp_next,
             "is_overload": rm["is_overload_next"],
             "security_gauge": rm["gauge_final"],
+            "boss_hit_event": gated_boss_hit,
+            "tracking_laser_hit_boss_tick": rm["laser_hits_boss"],
         }
         return obs, state_next, reward, done, info
 
@@ -717,8 +725,9 @@ class LotusPhase1Env(environment.Environment):
         )
         return self.get_observation(state, params), state
 
-    def get_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
+    def get_obs(self, state: Any, params: EnvParams) -> chex.Array:
         """Returns standard 130-dimensional flat normalized float32 observation tensor."""
+        state = getattr(state, "env_state", state)
         p_norm = jnp.array([
             state.player_x / params.screen_width,
             state.player_y / params.screen_height,
@@ -744,8 +753,9 @@ class LotusPhase1Env(environment.Environment):
 
         return jnp.concatenate([p_norm, laser_norm, deb_norm])
 
-    def get_extended_obs(self, state: EnvState, params: EnvParams) -> chex.Array:
+    def get_extended_obs(self, state: Any, params: EnvParams) -> chex.Array:
         """Returns extended 142-dimensional flat normalized float32 observation tensor for Remaster/Hybrid."""
+        state = getattr(state, "env_state", state)
         base_obs = self.get_obs(state, params)
         remaster_features = jnp.array([
             state.security_gauge,
