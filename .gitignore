@@ -50,7 +50,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Checkpoints and media artifacts
+# Checkpoints and root media artifacts
 checkpoints/
 *.gif
 *.png
+!assets/*.gif
+!assets/*.png
