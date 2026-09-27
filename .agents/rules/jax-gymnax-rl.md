@@ -33,3 +33,8 @@ When implementing or modifying JAX-accelerated simulation environments:
    - Reserve `jax.debug.callback` strictly for non-blocking host telemetry and metric printing; do not dispatch async disk checkpointing inside callback worker threads.
    - Always save Orbax checkpoints with `force=True` to allow safe overwriting.
    - Explicitly call `checkpointer.wait_until_finished()` and `checkpointer.close()` before process exit to prevent interpreter shutdown race conditions.
+
+7. **Host Visualization & Zero-Copy State Batching**:
+   - Never access individual fields of JAX `EnvState` DeviceArrays inside rendering loops (e.g., `float(state.player_x)` or `state.debris_x[i]`).
+   - Use `jax.device_get(state)` once per simulation tick to batch-transfer the entire state PyTree to CPU memory before passing it to host renderers (such as Pygame, OpenCV, or Matplotlib).
+   - Convert static hazard buffers (e.g. `debris_x`, `debris_active`) to `np.asarray()` during host state unpacking to allow vectorized CPU masking (`np.where(active)[0]`) with zero accelerator sync stalls.

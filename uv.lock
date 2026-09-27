@@ -545,6 +545,7 @@ dependencies = [
     { name = "jax" },
     { name = "jsonschema" },
     { name = "optax" },
+    { name = "orbax-checkpoint" },
     { name = "pytest" },
 ]
 
@@ -562,6 +563,7 @@ requires-dist = [
     { name = "jax" },
     { name = "jsonschema", specifier = ">=4.20.0" },
     { name = "optax" },
+    { name = "orbax-checkpoint" },
     { name = "pytest", specifier = ">=8.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
 ]
