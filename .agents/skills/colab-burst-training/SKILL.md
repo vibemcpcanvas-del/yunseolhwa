@@ -19,14 +19,14 @@ It leverages:
 
 ## Quick Invocations
 
-### 1. Launch TPU Training (1,000,000+ SPS Target)
+### 1. Launch Maximum GPU Training (Tesla T4 / 65,536 Envs / 10-min Time Checkpoints)
 ```bash
-python run_colab_train.py --accelerator tpu --tpu_type v5e1 --mode 1 --num_envs 16384 --num_updates 300
+python run_colab_train.py --accelerator gpu --gpu_type T4 --mode 1 --num_envs 65536 --num_updates 50000 --checkpoint_interval_seconds 600.0 --chunk_size 200
 ```
 
-### 2. Launch GPU Training (Tesla T4 / 4,096 Envs)
+### 2. Launch Standard GPU Training (Tesla T4 / 16,384 Envs)
 ```bash
-python run_colab_train.py --accelerator gpu --gpu_type T4 --mode 1 --num_envs 4096 --num_updates 300
+python run_colab_train.py --accelerator gpu --gpu_type T4 --mode 1 --num_envs 16384 --num_updates 10000 --checkpoint_interval_seconds 600.0
 ```
 
 ### 3. Check Account Quotas

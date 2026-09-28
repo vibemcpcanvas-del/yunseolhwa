@@ -76,3 +76,16 @@ When implementing or modifying JAX-accelerated simulation environments:
    - **True Host ACKs over Remote Streaming**: Streaming bridges must enforce `Content-Length` matches, verify end-to-end SHA256 checksums, catch archive extraction faults, and handle idempotent duplicate transfers (200) vs hash collisions (409 Conflict). Never mark an update step as verified for resumption based solely on unverified stdout log lines.
    - **Tesla T4 Tensor Core Precision Adaptation**: Because Tesla T4 GPUs (Turing architecture) lack native `bfloat16` hardware acceleration, cloud dispatchers targeting T4 must automatically adapt `bfloat16` compute to `float16` while preserving `float32` physical simulation, preventing severe software emulation slowdowns.
 
+14. **Anti-Safe-Haven Evasion Invariant & Gimmick Isolation**:
+   - **Full-Span Hazard Spawning**: Dynamic arena hazards (falling debris, artillery) must span 100% of the playable arena width (`minval=wall_left, maxval=wall_right`) without unpopulated buffer margins that create zero-risk sanctuaries.
+   - **Contextual Haven Gating**: Safe zones or refuges designed for phase-specific boss gimmicks (e.g. Overload horizontal bombardment) MUST remain physically and reward-wise inactive during standard phases.
+   - **Anti-Haven Wall Penalty Coverage**: During non-gimmick phases, arena boundary penalties must encompass the haven boundaries (e.g. `wall_margin = 220px` covering safe zone coordinates `x >= 1150`) with net-negative reward (`r_wall < -(r_base + r_hp)`) to render camping mathematically unprofitable.
+   - **Hit vs Death Penalty Decoupling**: Separate non-lethal hit penalties (moderate, e.g. -30.0) from terminal death penalties (-70.0) so that failed exploratory attempts to bait or interact with boss gimmicks maintain positive expected return (NPV > 0) relative to gimmick success rewards (+50.0).
+
+15. **GPU Saturation Scaling, Time-Based Checkpointing, and Convergence Watchdogs**:
+   - **Dedicated GPU Prioritization**: Default to dedicated GPU targets (`--gpu T4` with `--require_gpu`) over ephemeral TPU runtimes to prevent silent CPU fallbacks and PJRT device binding failures.
+   - **GPU Memory Saturation (`num_envs` Scaling)**: Scale parallel environments to warp-multiple bounds (`num_envs = 16,384` to `65,536`) to maximize Tensor Core occupancy and GPU SM utilization while keeping total buffer memory under ~70-80% of VRAM.
+   - **Time-Based Checkpointing Cadence**: Checkpoint saving and tunnel streaming must support wall-clock intervals (e.g. `--checkpoint_interval_seconds 600.0`, exactly 10 minutes) decoupled from update step counts, ensuring predictable host streaming cadence regardless of SPS.
+   - **Plateau & Policy Collapse Watchdog**: Open-ended/limitless training runs must continuously evaluate policy entropy (`entropy < 0.03` triggers early stop on policy collapse) and return gains across high-survival plateaus, gracefully terminating when training becomes mathematically meaningless.
+   - **Legacy Package Transitive Dependency Parity**: When installing isolated packages with `--no-deps` (e.g. `gymnax`), all required upstream dependencies (`gymnasium`, `flax`, `optax`) must be explicitly declared in base installation manifests.
+
