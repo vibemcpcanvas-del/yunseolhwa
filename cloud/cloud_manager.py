@@ -158,7 +158,7 @@ class CloudJaxManager:
         num_envs: Optional[int] = None,
         num_steps: int = 64,
         num_updates: int = 3000,
-        checkpoint_interval: int = 100,
+        checkpoint_interval: int = 1000,
         seed: int = 42,
         accelerator: str = "tpu",
         tpu_type: str = "v5e1",
@@ -310,7 +310,7 @@ def main():
     parser.add_argument("--num_envs", type=int, default=None, help="Parallel environments (default: 16384 on TPU, 4096 on GPU)")
     parser.add_argument("--num_steps", type=int, default=64, help="Rollout steps")
     parser.add_argument("--num_updates", type=int, default=3000, help="Updates count")
-    parser.add_argument("--checkpoint_interval", type=int, default=100, help="Checkpoint interval")
+    parser.add_argument("--checkpoint_interval", type=int, default=1000, help="Checkpoint interval")
     parser.add_argument("--dtype", type=str, default="bfloat16", choices=["float32", "bfloat16"], help="Compute precision")
     parser.add_argument("--seed", type=int, default=42, help="PRNG seed")
     args = parser.parse_args()
