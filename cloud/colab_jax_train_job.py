@@ -104,10 +104,12 @@ else:
         print("[*] Ensuring JAX with CUDA 12 support is up-to-date...", flush=True)
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "jax[cuda12]"], check=False)
     except Exception:
+        if getattr(args, "require_gpu", False):
+            raise RuntimeError("GPU acceleration required (--require_gpu) but no NVIDIA GPU detected!")
         print("[*] JAX Acceleration: CPU runtime", flush=True)
 
 # Install / upgrade required core packages so flax/optax/chex match modern JAX
-core_pkgs = ["flax", "optax", "orbax-checkpoint", "chex", "flashbax"]
+core_pkgs = ["flax", "optax", "orbax-checkpoint", "chex", "flashbax", "gymnasium"]
 print(f"[*] Ensuring core JAX RL packages are up-to-date: {core_pkgs}...", flush=True)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U"] + core_pkgs, check=True)
 
