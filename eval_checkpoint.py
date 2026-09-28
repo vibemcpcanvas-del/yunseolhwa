@@ -17,15 +17,22 @@ def evaluate_checkpoint(checkpoint_path: str, num_episodes: int = 10, eval_steps
     abs_path = os.path.abspath(checkpoint_path)
     print(f"[Eval] Loading checkpoint: {abs_path}")
 
-    checkpointer = ocp.StandardCheckpointer()
-    restored_params = checkpointer.restore(abs_path)
-    checkpointer.close()
-
     mode = 1  # Remastered
     env = LotusPhase1Env()
     params = EnvParams(mode=mode, max_steps_in_episode=eval_steps)
     wrapped = FlattenObservationWrapper(env)
     network = ActorCritic(action_dim=7)
+
+    obs_dim = 142 if params.is_remastered else 130
+    dummy_obs = jnp.zeros((1, obs_dim), dtype=jnp.float32)
+    dummy_params = network.init(jax.random.PRNGKey(0), dummy_obs)
+
+    checkpointer = ocp.StandardCheckpointer()
+    try:
+        restored_params = checkpointer.restore(abs_path, target=dummy_params)
+    except Exception:
+        restored_params = checkpointer.restore(abs_path)
+    checkpointer.close()
 
     def greedy_policy(obs, state, key):
         logits, _ = network.apply(restored_params, obs)
