@@ -110,4 +110,6 @@ def evaluate_checkpoint(checkpoint_path: str, num_episodes: int = 10, eval_steps
 
 
 if __name__ == "__main__":
-    evaluate_checkpoint("checkpoints/mode_1/step_1000", num_episodes=10, eval_steps=1200)
+    import sys
+    ckpt_path = sys.argv[1] if len(sys.argv) > 1 else "checkpoints/mode_1/step_300"
+    evaluate_checkpoint(ckpt_path, num_episodes=10, eval_steps=1200)
