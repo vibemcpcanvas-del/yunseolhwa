@@ -189,9 +189,9 @@ class CloudJaxManager:
     def run_training(
         self,
         mode: int = 1,
-        num_envs: Optional[int] = 65536,
+        num_envs: Optional[int] = 16384,
         num_steps: int = 64,
-        num_updates: int = 50000,
+        num_updates: int = 25000,
         checkpoint_interval: int = 1000,
         checkpoint_interval_seconds: float = 600.0,
         chunk_size: int = 200,
@@ -202,9 +202,9 @@ class CloudJaxManager:
         dtype: str = "float16"
     ) -> bool:
         """Executes full training pipeline on Colab with auto-rotation."""
-        # Auto-configure num_envs to 65,536 by default
+        # Auto-configure num_envs to 16,384 by default
         if num_envs is None:
-            num_envs = 65536
+            num_envs = 16384
 
         if accelerator == "gpu":
             dtype = resolve_gpu_dtype(gpu_type, dtype)
@@ -363,9 +363,9 @@ def main():
     parser.add_argument("--accelerator", type=str, default="gpu", choices=["gpu", "tpu"], help="Accelerator target (gpu or tpu)")
     parser.add_argument("--gpu_type", type=str, default="T4", help="GPU accelerator (T4, A100, L4)")
     parser.add_argument("--mode", type=int, default=1, help="0: Classic, 1: Remastered, 2: Hybrid")
-    parser.add_argument("--num_envs", type=int, default=65536, help="Parallel environments (default: 65536)")
+    parser.add_argument("--num_envs", type=int, default=16384, help="Parallel environments (default: 16384)")
     parser.add_argument("--num_steps", type=int, default=64, help="Rollout steps")
-    parser.add_argument("--num_updates", type=int, default=50000, help="Updates count (50,000 = ~524억 환경 스텝)")
+    parser.add_argument("--num_updates", type=int, default=25000, help="Updates count (25,000 = ~262억 환경 스텝)")
     parser.add_argument("--checkpoint_interval", type=int, default=1000, help="Checkpoint interval in updates")
     parser.add_argument("--checkpoint_interval_seconds", type=float, default=600.0, help="Time-based save interval (default: 600s = 10 min)")
     parser.add_argument("--chunk_size", type=int, default=200, help="JIT scan chunk size")

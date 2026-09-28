@@ -731,13 +731,38 @@ def main():
     t0 = time.perf_counter()
     if config.resume_from:
         dummy_runner_state = jitted_init(rng_init)
-        runner_state, current_step, config = load_resume_state(
-            config.resume_from,
-            config,
-            target_runner_state=dummy_runner_state,
-            allow_precision_loss=config.allow_precision_loss,
-        )
-        print(f"[Resume] Restored RunnerState from {config.resume_from} at update {current_step}", flush=True)
+        try:
+            runner_state, current_step, config = load_resume_state(
+                config.resume_from,
+                config,
+                target_runner_state=dummy_runner_state,
+                allow_precision_loss=config.allow_precision_loss,
+            )
+            print(f"[Resume] Restored full RunnerState from {config.resume_from} at update {current_step}", flush=True)
+        except Exception as e:
+            print(f"[Resume Fallback] Full RunnerState restore bypassed ({e}). Restoring policy weights into new environment configuration...", flush=True)
+            step_dir = os.path.abspath(config.resume_from)
+            if os.path.basename(step_dir) == "_resume_state":
+                step_dir = os.path.dirname(step_dir)
+            checkpointer = ocp.StandardCheckpointer()
+            try:
+                restored_params = checkpointer.restore(step_dir, target=dummy_runner_state.train_state.params)
+            except Exception:
+                restored_params = checkpointer.restore(step_dir)
+            checkpointer.close()
+
+            new_train_state = dummy_runner_state.train_state.replace(params=restored_params)
+            runner_state = dummy_runner_state._replace(train_state=new_train_state)
+            current_step = 0
+            manifest_p = os.path.join(step_dir, "_resume_state", "manifest.json")
+            if os.path.exists(manifest_p):
+                try:
+                    with open(manifest_p, "r", encoding="utf-8") as mf:
+                        m_data = json.load(mf)
+                        current_step = int(m_data.get("update", 0))
+                except Exception:
+                    pass
+            print(f"[Resume] Restored policy parameters into fresh {config.num_envs:,}-env runner at update {current_step}!", flush=True)
     else:
         runner_state = jitted_init(rng_init)
         jax.block_until_ready(runner_state.train_state.params)
