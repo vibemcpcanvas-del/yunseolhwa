@@ -110,12 +110,46 @@ class CloudJaxManager:
 
     def get_verified_resume_dir(self, mode: int) -> Optional[str]:
         """Locates the latest verified checkpoint directory on the host workstation."""
-        if self.last_verified_step <= 0:
-            return None
-        candidate = os.path.join(PROJECT_ROOT, "checkpoints", f"mode_{mode}", f"step_{self.last_verified_step}")
-        manifest = os.path.join(candidate, "_resume_state", "manifest.json")
-        if os.path.exists(manifest):
-            return candidate
+        candidates = []
+        if self.last_verified_step > 0:
+            candidates.extend([
+                os.path.join(PROJECT_ROOT, "checkpoints", f"mode_{mode}", f"step_{self.last_verified_step}"),
+                os.path.join(PROJECT_ROOT, "checkpoints", f"step_{self.last_verified_step}"),
+            ])
+
+        ckpt_root = os.path.join(PROJECT_ROOT, "checkpoints")
+        if os.path.exists(ckpt_root):
+            for root, dirs, files in os.walk(ckpt_root):
+                if "manifest.json" in files and os.path.basename(root) == "_resume_state":
+                    step_dir = os.path.dirname(root)
+                    dir_name = os.path.basename(step_dir)
+                    if dir_name.startswith("step_"):
+                        try:
+                            s = int(dir_name.split("_")[1])
+                            candidates.append((s, step_dir))
+                        except Exception:
+                            pass
+
+        if candidates:
+            valid_candidates = []
+            for item in candidates:
+                if isinstance(item, tuple):
+                    s, p = item
+                else:
+                    p = item
+                    try:
+                        s = int(os.path.basename(p).split("_")[1])
+                    except Exception:
+                        s = 0
+                manifest = os.path.join(p, "_resume_state", "manifest.json")
+                if os.path.exists(manifest):
+                    valid_candidates.append((s, p))
+
+            if valid_candidates:
+                valid_candidates.sort(key=lambda x: x[0], reverse=True)
+                best_step, best_path = valid_candidates[0]
+                self.last_verified_step = best_step
+                return best_path
         return None
 
     def _handle_signal(self, sig, frame):
@@ -255,10 +289,12 @@ class CloudJaxManager:
                     "Quota exceeded", "Rate limit", "ResourceExhausted",
                     "Subscription required", "pro subscription",
                     "cannot assign", "unsupported accelerator",
-                    "503 Server Error", "503 Service Unavailable", "status code 503"
+                    "503 Server Error", "503 Service Unavailable", "status code 503",
+                    "Auto-termination triggered", "Safety 4h execution limit",
+                    "Session terminated", "Session closed", "No active sessions",
                 ]):
                     quota_exhausted = True
-                    print(f"\n[QUOTA] Quota/tier limitation on account '{acc_name}'. Triggering account rotation...", flush=True)
+                    print(f"\n[QUOTA/TIMEOUT] Session limitation/termination on account '{acc_name}'. Triggering account rotation...", flush=True)
                     try:
                         proc.terminate()
                         proc.wait(timeout=5)
@@ -271,6 +307,14 @@ class CloudJaxManager:
 
             if not quota_exhausted:
                 proc.wait()
+                # Check if session ended before completing all target updates
+                if self.tunnel_manager:
+                    last_step = self.tunnel_manager.get_last_verified_step()
+                    if last_step > 0:
+                        self.last_verified_step = max(self.last_verified_step, last_step)
+                if self.last_verified_step < num_updates and proc.returncode != 0:
+                    print(f"\n[SESSION] Session ended at step {self.last_verified_step}/{num_updates} (code {proc.returncode}). Rotating account to resume...", flush=True)
+                    quota_exhausted = True
 
             if quota_exhausted:
                 if self.tunnel_manager:
