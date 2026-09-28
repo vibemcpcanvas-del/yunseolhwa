@@ -51,8 +51,16 @@ def to_wsl_path(win_path: str) -> str:
     return win_path.replace('\\', '/')
 
 
-def package_jax_codebase(output_tar: str) -> int:
-    """Packages src/, train_ppo.py, pyproject.toml into an uploadable tarball."""
+def resolve_gpu_dtype(gpu_type: str, requested_dtype: str) -> str:
+    """Resolves GPU compute dtype, automatically falling back to float16 on Tesla T4."""
+    if gpu_type.upper() == "T4" and requested_dtype.lower() == "bfloat16":
+        print("[WARN] Tesla T4 lacks native bfloat16 hardware; falling back to float16 for peak Tensor Core throughput.", flush=True)
+        return "float16"
+    return requested_dtype
+
+
+def package_jax_codebase(output_tar: str, resume_step_dir: Optional[str] = None) -> int:
+    """Packages src/, train_ppo.py, pyproject.toml and optional resume checkpoint into an uploadable tarball."""
     print(f"[*] Packaging project codebase into {output_tar}...", flush=True)
     os.makedirs(os.path.dirname(output_tar), exist_ok=True)
     with tarfile.open(output_tar, "w") as tar:
@@ -76,6 +84,11 @@ def package_jax_codebase(output_tar: str) -> int:
         if os.path.exists(pyproject_file):
             tar.add(pyproject_file, arcname="pyproject.toml")
 
+        # Include verified resume checkpoint if supplied
+        if resume_step_dir and os.path.exists(resume_step_dir):
+            print(f"[*] Bundling verified resume checkpoint from {resume_step_dir} into archive...", flush=True)
+            tar.add(resume_step_dir, arcname="resume_checkpoint")
+
     size = os.path.getsize(output_tar)
     print(f"[SUCCESS] Packaged codebase ({size / (1024*1024):.2f} MB)", flush=True)
     return size
@@ -86,6 +99,7 @@ class CloudJaxManager:
 
     def __init__(self):
         self.tunnel_manager: Optional[JaxTunnelTransferManager] = None
+        self.last_verified_step: int = 0
         self._is_terminating: bool = False
         atexit.register(self.stop)
         try:
@@ -93,6 +107,16 @@ class CloudJaxManager:
             signal.signal(signal.SIGTERM, self._handle_signal)
         except Exception:
             pass
+
+    def get_verified_resume_dir(self, mode: int) -> Optional[str]:
+        """Locates the latest verified checkpoint directory on the host workstation."""
+        if self.last_verified_step <= 0:
+            return None
+        candidate = os.path.join(PROJECT_ROOT, "checkpoints", f"mode_{mode}", f"step_{self.last_verified_step}")
+        manifest = os.path.join(candidate, "_resume_state", "manifest.json")
+        if os.path.exists(manifest):
+            return candidate
+        return None
 
     def _handle_signal(self, sig, frame):
         print(f"\n[Safe Teardown] Signal {sig} received. Terminating cloud manager...", flush=True)
@@ -146,12 +170,20 @@ class CloudJaxManager:
         if num_envs is None:
             num_envs = 16384 if accelerator == "tpu" else 4096
 
+        if accelerator == "gpu":
+            dtype = resolve_gpu_dtype(gpu_type, dtype)
+
         print("=" * 68, flush=True)
         print(" 🎮 Maple-Gymnax Cloud Training Orchestrator (1M+ SPS TPU/GPU Target)", flush=True)
         print("=" * 68, flush=True)
 
+        # Locate verified resume checkpoint if resuming after rotation or available
+        resume_step_dir = self.get_verified_resume_dir(mode)
+        if resume_step_dir:
+            print(f"[RESUME] Found verified checkpoint step_{self.last_verified_step} for VM resumption.", flush=True)
+
         # 1. Package codebase
-        package_jax_codebase(UPLOAD_TAR_LOCAL)
+        package_jax_codebase(UPLOAD_TAR_LOCAL, resume_step_dir=resume_step_dir)
 
         # 2. Check accounts in pool
         reg = cam.load_registry()
@@ -169,6 +201,8 @@ class CloudJaxManager:
             output_checkpoints_tar=DOWNLOAD_TAR_LOCAL,
             extract_target_dir=os.path.join(PROJECT_ROOT, "checkpoints")
         )
+        if self.last_verified_step > 0:
+            self.tunnel_manager.verified_steps.add(self.last_verified_step)
         tunnel_url = self.tunnel_manager.start()
 
         # 4. Prepare accelerator CLI arguments
@@ -176,6 +210,10 @@ class CloudJaxManager:
             accel_args = ["--tpu", tpu_type]
         else:
             accel_args = ["--gpu", gpu_type]
+
+        extra_remote_args = ["--log_interval", "20"]
+        if accelerator == "gpu":
+            extra_remote_args.append("--require_gpu")
 
         wsl_script = to_wsl_path(TRAIN_JOB_SCRIPT)
         cmd = [
@@ -191,8 +229,8 @@ class CloudJaxManager:
             "--num_updates", str(num_updates),
             "--checkpoint_interval", str(checkpoint_interval),
             "--seed", str(seed),
-            "--dtype", str(dtype)
-        ]
+            "--dtype", str(dtype),
+        ] + extra_remote_args
 
         print(f"[*] Dispatching Colab {accelerator.upper()} job on account '{acc_name}'...", flush=True)
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -230,6 +268,11 @@ class CloudJaxManager:
                 proc.wait()
 
             if quota_exhausted:
+                if self.tunnel_manager:
+                    last_step = self.tunnel_manager.get_last_verified_step()
+                    if last_step > 0:
+                        self.last_verified_step = max(self.last_verified_step, last_step)
+                        print(f"[RESUME] Preserving verified step {self.last_verified_step} for rotation.", flush=True)
                 self.stop()
                 next_acc = cam.switch_next_account()
                 if next_acc:
@@ -239,7 +282,8 @@ class CloudJaxManager:
                     if accelerator == "tpu":
                         print("[FALLBACK] TPU unavailable across account pool. Falling back to GPU (T4)...", flush=True)
                         cam.reset_all_quotas()
-                        return self.run_training(mode, 4096, num_steps, num_updates, checkpoint_interval, seed, "gpu", tpu_type, "T4", dtype)
+                        gpu_dtype = resolve_gpu_dtype("T4", dtype)
+                        return self.run_training(mode, 4096, num_steps, num_updates, checkpoint_interval, seed, "gpu", tpu_type, "T4", gpu_dtype)
                     print("[ERROR] All Colab accounts in combo pool are exhausted.", flush=True)
                     return False
 

@@ -65,7 +65,9 @@ parser.add_argument("--num_envs", type=int, default=16384, help="Number of paral
 parser.add_argument("--num_steps", type=int, default=64, help="Rollout steps per update")
 parser.add_argument("--num_updates", type=int, default=300, help="Total PPO updates")
 parser.add_argument("--checkpoint_interval", type=int, default=50, help="Checkpoint interval in updates")
-parser.add_argument("--dtype", type=str, default="bfloat16", choices=["float32", "bfloat16"], help="Compute precision")
+parser.add_argument("--dtype", type=str, default="bfloat16", choices=["float32", "bfloat16", "float16"], help="Compute precision")
+parser.add_argument("--log_interval", type=int, default=20, help="Console logging interval")
+parser.add_argument("--require_gpu", action="store_true", help="Enforce GPU backend requirement")
 parser.add_argument("--seed", type=int, default=42, help="PRNG seed")
 args, _ = parser.parse_known_args()
 
@@ -152,7 +154,7 @@ else:
 # 5. Live Intermediate Checkpoint Push Helper
 # ---------------------------------------------------------------------------
 push_helper_script = "/content/push_checkpoint.py"
-push_helper_code = '''import os, sys, tarfile, urllib.request
+push_helper_code = '''import hashlib, os, sys, tarfile, urllib.request
 
 step = sys.argv[1]
 step_dir = sys.argv[2]
@@ -169,17 +171,20 @@ try:
     with open(tar_path, "rb") as f:
         data = f.read()
 
+    sha256_hash = hashlib.sha256(data).hexdigest()
+
     req = urllib.request.Request(
-        f"{tunnel_url}/upload_checkpoint?step={step}",
+        f"{tunnel_url}/upload_checkpoint?step={step}&sha256={sha256_hash}",
         data=data,
         method="POST",
         headers={"Content-Type": "application/octet-stream", "Content-Length": str(len(data))}
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         if resp.status == 200:
-            print(f"[LiveSync] Intermediate checkpoint '{step}' synced to host workstation.", flush=True)
+            print(f"[LiveSync] Intermediate checkpoint '{step}' synced to host workstation (SHA256 verified).", flush=True)
 except Exception as e:
     print(f"[LiveSync Warning] Checkpoint streaming error: {e}", flush=True)
+    sys.exit(1)
 finally:
     if os.path.exists(tar_path):
         try: os.remove(tar_path)
@@ -206,9 +211,21 @@ train_cmd = [
     "--num_steps", str(args.num_steps),
     "--num_updates", str(args.num_updates),
     "--checkpoint_interval", str(args.checkpoint_interval),
+    "--log_interval", str(args.log_interval),
     "--seed", str(args.seed),
     "--dtype", str(args.dtype),
 ]
+
+if args.require_gpu:
+    train_cmd.append("--require_gpu")
+
+resume_checkpoint_dir = os.path.join(WORKSPACE_DIR, "resume_checkpoint")
+resume_manifest = os.path.join(resume_checkpoint_dir, "_resume_state", "manifest.json")
+if os.path.exists(resume_manifest):
+    print(f"[*] Verified resume state found at {resume_checkpoint_dir}. Resuming training!", flush=True)
+    train_cmd.extend(["--resume_from", resume_checkpoint_dir, "--allow_precision_loss"])
+else:
+    print("[*] No verified resume state found; starting fresh.", flush=True)
 
 if TUNNEL_URL:
     callback_arg = f"{sys.executable} {push_helper_script} step_{{step}} {{step_dir}} {TUNNEL_URL}"

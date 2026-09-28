@@ -42,6 +42,7 @@ from maple_gymnax.envs.lotus_phase1 import LotusPhase1Env, EnvParams
 from maple_gymnax.wrappers.log_wrapper import LogWrapper, LogEnvState
 from maple_gymnax.wrappers.flatten_obs import FlattenObservationWrapper
 from maple_gymnax.wrappers.rollout_runner import RolloutRunner
+from maple_gymnax.resume_state import save_resume_state, load_resume_state
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +78,9 @@ class PPOConfig:
     dtype: str = "float32"
     param_dtype: str = "float32"
     on_checkpoint_cmd: Optional[str] = None
+    resume_from: Optional[str] = None
+    allow_precision_loss: bool = False
+    require_gpu: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +256,14 @@ def make_train_step(
     else:
         lr_schedule = config.lr
 
-    compute_dtype = jnp.bfloat16 if config.dtype == "bfloat16" else jnp.float32
-    param_dtype = jnp.float32
+    compute_dtype = (
+        jnp.float16 if config.dtype == "float16"
+        else (jnp.bfloat16 if config.dtype == "bfloat16" else jnp.float32)
+    )
+    param_dtype = (
+        jnp.float16 if config.param_dtype == "float16"
+        else (jnp.bfloat16 if config.param_dtype == "bfloat16" else jnp.float32)
+    )
     network = ActorCritic(action_dim=action_dim, dtype=compute_dtype, param_dtype=param_dtype)
     tx = optax.chain(
         optax.clip_by_global_norm(config.max_grad_norm),
@@ -498,8 +508,13 @@ def make_train(config: PPOConfig) -> Callable[[chex.PRNGKey], Tuple[RunnerState,
 # 7. Checkpoint & Evaluation Utilities
 # ---------------------------------------------------------------------------
 
-def save_checkpoint_orbax(params: Any, config: PPOConfig, step: int) -> str:
-    """Persists model PyTree weights using Orbax StandardCheckpointer."""
+def save_checkpoint_orbax(
+    params: Any,
+    config: PPOConfig,
+    step: int,
+    runner_state: Optional[Any] = None,
+) -> str:
+    """Persists model PyTree weights and full runner state using Orbax StandardCheckpointer."""
     ckpt_dir = os.path.abspath(os.path.join(config.checkpoint_dir, f"mode_{config.mode}"))
     os.makedirs(ckpt_dir, exist_ok=True)
     step_dir = os.path.join(ckpt_dir, f"step_{step}")
@@ -518,6 +533,10 @@ def save_checkpoint_orbax(params: Any, config: PPOConfig, step: int) -> str:
     meta_path = os.path.join(step_dir, "config.json")
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(dataclasses_asdict(config), f, indent=2)
+
+    # Save full resumable state if runner_state is provided
+    if runner_state is not None:
+        save_resume_state(step_dir, runner_state, step, config)
 
     print(f"[Orbax] Checkpoint successfully saved to: {step_dir}")
     return step_dir
@@ -624,11 +643,17 @@ def parse_args() -> PPOConfig:
     parser.add_argument("--checkpoint_interval", type=int, default=50,
                         help="Checkpoint frequency (chunk size for outer python loop)")
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints", help="Orbax save directory")
-    parser.add_argument("--dtype", type=str, default="float32", choices=["float32", "bfloat16"],
-                        help="Neural network compute precision (float32 or bfloat16)")
+    parser.add_argument("--dtype", type=str, default="float32", choices=["float32", "bfloat16", "float16"],
+                        help="Neural network compute precision (float32, bfloat16, or float16)")
     parser.add_argument("--on_checkpoint_cmd", type=str, default=None,
                         help="Command/script to execute on checkpoint commit (supports {step} and {step_dir})")
     parser.add_argument("--eval_steps", type=int, default=1200, help="Evaluation rollout steps")
+    parser.add_argument("--resume_from", type=str, default=None,
+                        help="Path to checkpoint directory or _resume_state to resume training from")
+    parser.add_argument("--allow_precision_loss", action="store_true",
+                        help="Allow precision downcast (e.g., float32 to float16) during resume")
+    parser.add_argument("--require_gpu", action="store_true",
+                        help="Raise error if JAX backend is not GPU")
 
     args = parser.parse_args()
 
@@ -653,11 +678,24 @@ def parse_args() -> PPOConfig:
         checkpoint_dir=args.checkpoint_dir,
         dtype=args.dtype,
         on_checkpoint_cmd=args.on_checkpoint_cmd,
+        resume_from=args.resume_from,
+        allow_precision_loss=args.allow_precision_loss,
+        require_gpu=args.require_gpu,
     )
+
+
+def require_gpu(required: bool) -> None:
+    """Validates that JAX initialized on a GPU backend if required."""
+    if required:
+        backend = jax.default_backend()
+        if backend != "gpu":
+            raise RuntimeError(f"GPU backend required (--require_gpu) but JAX initialized with: {backend}")
 
 
 def main():
     config = parse_args()
+    require_gpu(config.require_gpu)
+
     mode_name = "Classic" if config.mode == 0 else ("Remastered" if config.mode == 1 else "Hybrid")
 
     print("=" * 76)
@@ -679,14 +717,24 @@ def main():
 
     print("\n[XLA] Initializing runner state and JIT-compiling chunk kernel...")
     t0 = time.perf_counter()
-    runner_state = jitted_init(rng_init)
-    jax.block_until_ready(runner_state.train_state.params)
+    if config.resume_from:
+        dummy_runner_state = jitted_init(rng_init)
+        runner_state, current_step, config = load_resume_state(
+            config.resume_from,
+            config,
+            target_runner_state=dummy_runner_state,
+            allow_precision_loss=config.allow_precision_loss,
+        )
+        print(f"[Resume] Restored RunnerState from {config.resume_from} at update {current_step}", flush=True)
+    else:
+        runner_state = jitted_init(rng_init)
+        jax.block_until_ready(runner_state.train_state.params)
+        current_step = 0
 
     chunk_size = config.checkpoint_interval
     num_updates = config.num_updates
 
     # Outer Python Loop: executes in chunk_size increments and automatically saves Orbax checkpoints
-    current_step = 0
     while current_step < num_updates:
         this_chunk = min(chunk_size, num_updates - current_step)
         chunk_indices = jnp.arange(current_step, current_step + this_chunk)
@@ -696,15 +744,19 @@ def main():
         current_step += this_chunk
 
         # Automatic checkpoint saving at every chunk completion
-        step_dir = save_checkpoint_orbax(runner_state.train_state.params, config, current_step)
+        step_dir = save_checkpoint_orbax(
+            runner_state.train_state.params, config, current_step, runner_state=runner_state
+        )
         print(f"[Loop Progress] Completed {current_step}/{num_updates} updates (Checkpoint saved)", flush=True)
 
         if config.on_checkpoint_cmd:
             try:
                 cmd_to_run = config.on_checkpoint_cmd.format(step=current_step, step_dir=step_dir)
-                subprocess.run(cmd_to_run, shell=True, check=False)
+                ret = subprocess.run(cmd_to_run, shell=True, check=False)
+                if ret.returncode != 0:
+                    print(f"[WARN] on_checkpoint_cmd returned non-zero exit code: {ret.returncode}", flush=True)
             except Exception as cb_err:
-                print(f"[!] on_checkpoint_cmd warning: {cb_err}", flush=True)
+                print(f"[WARN] on_checkpoint_cmd warning: {cb_err}", flush=True)
 
     total_time = time.perf_counter() - t0
     total_sim_steps = config.num_envs * config.num_steps * config.num_updates
