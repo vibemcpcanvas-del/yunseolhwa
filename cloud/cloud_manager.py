@@ -206,16 +206,28 @@ class CloudJaxManager:
                     continue
                 print(f"[colab-jax] {clean}", flush=True)
 
-                if any(err in clean for err in [
-                    "Quota exceeded", "Rate limit", "503", "ResourceExhausted",
-                    "not available", "Subscription required", "pro subscription",
-                    "cannot assign", "unsupported accelerator"
+                # Avoid false positives from training metric values like -503.79
+                is_training_metric = "[Update" in clean
+                if not is_training_metric and any(err in clean for err in [
+                    "Quota exceeded", "Rate limit", "ResourceExhausted",
+                    "Subscription required", "pro subscription",
+                    "cannot assign", "unsupported accelerator",
+                    "503 Server Error", "503 Service Unavailable", "status code 503"
                 ]):
                     quota_exhausted = True
                     print(f"\n[QUOTA] Quota/tier limitation on account '{acc_name}'. Triggering account rotation...", flush=True)
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=5)
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
                     break
 
-            proc.wait()
+            if not quota_exhausted:
+                proc.wait()
 
             if quota_exhausted:
                 self.stop()
