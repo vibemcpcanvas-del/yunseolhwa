@@ -66,6 +66,11 @@ def package_jax_codebase(output_tar: str) -> int:
         if os.path.exists(train_file):
             tar.add(train_file, arcname="train_ppo.py")
 
+        # Add eval_checkpoint.py
+        eval_file = os.path.join(PROJECT_ROOT, "eval_checkpoint.py")
+        if os.path.exists(eval_file):
+            tar.add(eval_file, arcname="eval_checkpoint.py")
+
         # Add pyproject.toml
         pyproject_file = os.path.join(PROJECT_ROOT, "pyproject.toml")
         if os.path.exists(pyproject_file):
@@ -201,9 +206,13 @@ class CloudJaxManager:
                     continue
                 print(f"[colab-jax] {clean}", flush=True)
 
-                if "Quota exceeded" in clean or "Rate limit" in clean or "503" in clean:
+                if any(err in clean for err in [
+                    "Quota exceeded", "Rate limit", "503", "ResourceExhausted",
+                    "not available", "Subscription required", "pro subscription",
+                    "cannot assign", "unsupported accelerator"
+                ]):
                     quota_exhausted = True
-                    print(f"\n[QUOTA] Quota exhausted for account '{acc_name}'. Triggering account rotation...", flush=True)
+                    print(f"\n[QUOTA] Quota/tier limitation on account '{acc_name}'. Triggering account rotation...", flush=True)
                     break
 
             proc.wait()
@@ -215,6 +224,10 @@ class CloudJaxManager:
                     print(f"[COMBO] Switched to next account '{next_acc.get('name')}'. Retrying on {next_acc.get('name')}...", flush=True)
                     return self.run_training(mode, num_envs, num_steps, num_updates, checkpoint_interval, seed, accelerator, tpu_type, gpu_type, dtype)
                 else:
+                    if accelerator == "tpu":
+                        print("[FALLBACK] TPU unavailable across account pool. Falling back to GPU (T4)...", flush=True)
+                        cam.reset_all_quotas()
+                        return self.run_training(mode, 4096, num_steps, num_updates, checkpoint_interval, seed, "gpu", tpu_type, "T4", dtype)
                     print("[ERROR] All Colab accounts in combo pool are exhausted.", flush=True)
                     return False
 
@@ -247,7 +260,7 @@ def main():
     args = parser.parse_args()
 
     mgr = CloudJaxManager()
-    mgr.run_training(
+    ok = mgr.run_training(
         mode=args.mode,
         num_envs=args.num_envs,
         num_steps=args.num_steps,
@@ -259,6 +272,8 @@ def main():
         gpu_type=args.gpu_type,
         dtype=args.dtype
     )
+    if not ok:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

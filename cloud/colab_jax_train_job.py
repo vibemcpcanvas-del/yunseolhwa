@@ -82,57 +82,41 @@ print("=" * 68, flush=True)
 print(" 🚀 Colab JAX / Gymnax PPO Accelerator Job (TPU / GPU High-Throughput)", flush=True)
 print("=" * 68, flush=True)
 
-# Install required core packages
-required_pkgs = ["flax", "gymnax", "optax", "orbax-checkpoint", "chex"]
-missing = []
-for pkg in required_pkgs:
-    try:
-        __import__(pkg.replace("-", "_"))
-    except ImportError:
-        missing.append(pkg)
-
-if missing:
-    print(f"[*] Installing dependencies on Colab VM: {missing}...", flush=True)
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q"] + missing, check=True)
-
-# Hardware Platform Detection
-is_tpu = False
-try:
-    import jax
-    devices = jax.devices()
-    if any(d.platform == "tpu" for d in devices):
-        is_tpu = True
-except Exception:
-    pass
-
-if not is_tpu and os.path.exists("/dev/accel0"):
-    is_tpu = True
+# Hardware Platform Detection & Accelerator Setup
+is_tpu = os.path.exists("/dev/accel0") or bool(os.environ.get("TPU_NAME")) or bool(os.environ.get("COLAB_TPU_ADDR"))
 
 if is_tpu:
+    print("[*] JAX Acceleration: Cloud TPU detected (/dev/accel0)", flush=True)
     try:
-        import jax
-        assert jax.devices()[0].platform == "tpu"
-    except Exception:
-        print("[*] Installing jax[tpu] runtime for Cloud TPU...", flush=True)
+        print("[*] Installing/upgrading matching jax[tpu] runtime for Cloud TPU...", flush=True)
         subprocess.run([
-            sys.executable, "-m", "pip", "install", "-q", "jax[tpu]",
+            sys.executable, "-m", "pip", "install", "-q", "-U", "jax[tpu]",
             "-f", "https://storage.googleapis.com/jax-releases/libtpu_releases.html"
         ], check=False)
-
-    import jax
-    print(f"[*] JAX Acceleration: TPU ({len(jax.devices())} cores)", flush=True)
-    print(f"[*] TPU Devices: {jax.devices()}", flush=True)
+    except Exception:
+        pass
 else:
     try:
         smi = subprocess.check_output(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"], text=True)
         print(f"[*] JAX Acceleration: GPU ({smi.strip()})", flush=True)
+        print("[*] Ensuring JAX with CUDA 12 support is up-to-date...", flush=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "jax[cuda12]"], check=False)
     except Exception:
-        print("[!] No GPU or TPU detected. Defaulting to CPU.", flush=True)
+        print("[*] JAX Acceleration: CPU runtime", flush=True)
 
-    import jax
-    print(f"[*] JAX Default Backend: {jax.default_backend()} | Devices: {jax.devices()}", flush=True)
+# Install / upgrade required core packages so flax/optax/chex match modern JAX
+core_pkgs = ["flax", "optax", "orbax-checkpoint", "chex", "flashbax"]
+print(f"[*] Ensuring core JAX RL packages are up-to-date: {core_pkgs}...", flush=True)
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U"] + core_pkgs, check=True)
 
-print(f"[*] JAX Version: {jax.__version__} | Target Precision: {args.dtype} (Hybrid)", flush=True)
+# Install gymnax with --no-deps to prevent legacy jax<0.7 from downgrading jax/jaxlib
+try:
+    __import__("gymnax")
+except ImportError:
+    print("[*] Installing gymnax (--no-deps) on Colab VM...", flush=True)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps", "gymnax"], check=True)
+
+print(f"[*] Target Precision: {args.dtype} (Hybrid)", flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +136,10 @@ if TUNNEL_URL:
     if os.path.exists(UPLOAD_TAR_PATH):
         print(f"[SUCCESS] Downloaded codebase: {os.path.getsize(UPLOAD_TAR_PATH)/(1024*1024):.2f} MB", flush=True)
         with tarfile.open(UPLOAD_TAR_PATH, "r") as tar:
-            tar.extractall(path=WORKSPACE_DIR)
+            if hasattr(tarfile, "data_filter"):
+                tar.extractall(path=WORKSPACE_DIR, filter="data")
+            else:
+                tar.extractall(path=WORKSPACE_DIR)
         print(f"[SUCCESS] Codebase extracted into {WORKSPACE_DIR}", flush=True)
     else:
         print("[!] Failed to obtain codebase archive. Aborting.", flush=True)
@@ -206,7 +193,11 @@ with open(push_helper_script, "w", encoding="utf-8") as f:
 # 6. Execute train_ppo.py
 # ---------------------------------------------------------------------------
 os.chdir(WORKSPACE_DIR)
-sys.path.insert(0, os.path.join(WORKSPACE_DIR, "src"))
+src_dir = os.path.join(WORKSPACE_DIR, "src")
+sys.path.insert(0, src_dir)
+
+sub_env = os.environ.copy()
+sub_env["PYTHONPATH"] = f"{src_dir}:{sub_env.get('PYTHONPATH', '')}"
 
 train_cmd = [
     sys.executable, "train_ppo.py",
@@ -220,11 +211,11 @@ train_cmd = [
 ]
 
 if TUNNEL_URL:
-    callback_arg = f"python {push_helper_script} step_{{step}} {{step_dir}} {TUNNEL_URL}"
+    callback_arg = f"{sys.executable} {push_helper_script} step_{{step}} {{step_dir}} {TUNNEL_URL}"
     train_cmd.extend(["--on_checkpoint_cmd", callback_arg])
 
 print(f"\n[*] Executing JAX PPO Training: {' '.join(train_cmd)}\n", flush=True)
-proc = subprocess.Popen(train_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+proc = subprocess.Popen(train_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=sub_env)
 
 for line in iter(proc.stdout.readline, ''):
     clean = line.strip()

@@ -63,9 +63,12 @@ class LogWrapper:
         step_fn = self._env.step if hasattr(self._env, "step") else self._env.step_env
         key_step, key_reset = jax.random.split(key)
 
-        obs, next_env_state, reward, done, info = step_fn(
-            key_step, state.env_state, action, params
-        )
+        out = step_fn(key_step, state.env_state, action, params)
+        if len(out) == 6:
+            obs, next_env_state, reward, terminated, truncated, info = out
+            done = jnp.logical_or(terminated, truncated)
+        else:
+            obs, next_env_state, reward, done, info = out
 
         # Episode metric tracking
         new_returns = state.episode_returns + reward

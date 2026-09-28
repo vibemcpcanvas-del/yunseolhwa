@@ -32,7 +32,12 @@ class PureJaxRLAdapterWrapper:
         params: EnvParams,
     ) -> Tuple[chex.Array, EnvState, float, bool, Dict[str, Any]]:
         step_fn = self._env.step if hasattr(self._env, "step") else self._env.step_env
-        obs, next_state, reward, done, info = step_fn(key, state, action, params)
+        out = step_fn(key, state, action, params)
+        if len(out) == 6:
+            obs, next_state, reward, terminated, truncated, info = out
+            done = jnp.logical_or(terminated, truncated)
+        else:
+            obs, next_state, reward, done, info = out
         return obs, next_state, reward, done, info
 
     def step_env(

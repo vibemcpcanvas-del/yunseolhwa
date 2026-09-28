@@ -12,8 +12,13 @@ import argparse
 import json
 import os
 import shutil
+import sys
 import time
 from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple
+
+_SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
 
 import chex
 import flax
@@ -23,6 +28,14 @@ import jax
 import jax.numpy as jnp
 import optax
 import orbax.checkpoint as ocp
+
+# JAX 0.11+ backward compatibility shim for older Flax/tracers
+if not hasattr(jax.core, "get_opaque_trace_state"):
+    try:
+        import jax.extend.core
+        jax.core.get_opaque_trace_state = jax.extend.core.get_opaque_trace_state
+    except Exception:
+        pass
 
 from maple_gymnax.envs.lotus_phase1 import LotusPhase1Env, EnvParams
 from maple_gymnax.wrappers.log_wrapper import LogWrapper, LogEnvState

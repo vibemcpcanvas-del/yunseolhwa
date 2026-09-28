@@ -23,7 +23,10 @@ from typing import Any, Dict, NamedTuple
 
 import chex
 import jax
-from flashbax.buffers import make_flat_buffer
+try:
+    from flashbax.buffers import make_flat_buffer
+except ImportError:
+    make_flat_buffer = None
 
 
 class FlashbaxAdapter:
