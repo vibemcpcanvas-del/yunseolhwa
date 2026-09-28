@@ -65,6 +65,8 @@ parser.add_argument("--num_envs", type=int, default=16384, help="Number of paral
 parser.add_argument("--num_steps", type=int, default=64, help="Rollout steps per update")
 parser.add_argument("--num_updates", type=int, default=3000, help="Total PPO updates")
 parser.add_argument("--checkpoint_interval", type=int, default=1000, help="Checkpoint interval in updates")
+parser.add_argument("--checkpoint_interval_seconds", type=float, default=600.0, help="Time-based checkpoint interval in seconds")
+parser.add_argument("--chunk_size", type=int, default=200, help="JIT scan chunk size")
 parser.add_argument("--dtype", type=str, default="bfloat16", choices=["float32", "bfloat16", "float16"], help="Compute precision")
 parser.add_argument("--log_interval", type=int, default=20, help="Console logging interval")
 parser.add_argument("--require_gpu", action="store_true", help="Enforce GPU backend requirement")
@@ -213,6 +215,8 @@ train_cmd = [
     "--num_steps", str(args.num_steps),
     "--num_updates", str(args.num_updates),
     "--checkpoint_interval", str(args.checkpoint_interval),
+    "--checkpoint_interval_seconds", str(args.checkpoint_interval_seconds),
+    "--chunk_size", str(args.chunk_size),
     "--log_interval", str(args.log_interval),
     "--seed", str(args.seed),
     "--dtype", str(args.dtype),

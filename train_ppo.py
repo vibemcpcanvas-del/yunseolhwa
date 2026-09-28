@@ -80,6 +80,9 @@ class PPOConfig:
     on_checkpoint_cmd: Optional[str] = None
     resume_from: Optional[str] = None
     allow_precision_loss: bool = False
+    checkpoint_interval_seconds: float = 600.0  # Time-based save interval (seconds, default 10 min)
+    chunk_size: int = 200  # Number of updates per JIT scan chunk
+    plateau_patience: int = 15  # Plateau patience counter
     require_gpu: bool = False
 
 
@@ -652,6 +655,12 @@ def parse_args() -> PPOConfig:
                         help="Path to checkpoint directory or _resume_state to resume training from")
     parser.add_argument("--allow_precision_loss", action="store_true",
                         help="Allow precision downcast (e.g., float32 to float16) during resume")
+    parser.add_argument("--checkpoint_interval_seconds", type=float, default=600.0,
+                        help="Time-based checkpoint interval in seconds (default: 600.0 = 10 minutes, 0 to disable)")
+    parser.add_argument("--chunk_size", type=int, default=200,
+                        help="Number of update steps per JIT-compiled scan chunk")
+    parser.add_argument("--plateau_patience", type=int, default=15,
+                        help="Number of consecutive checks without improvement before early stopping")
     parser.add_argument("--require_gpu", action="store_true",
                         help="Raise error if JAX backend is not GPU")
 
@@ -680,6 +689,9 @@ def parse_args() -> PPOConfig:
         on_checkpoint_cmd=args.on_checkpoint_cmd,
         resume_from=args.resume_from,
         allow_precision_loss=args.allow_precision_loss,
+        checkpoint_interval_seconds=args.checkpoint_interval_seconds,
+        chunk_size=args.chunk_size,
+        plateau_patience=args.plateau_patience,
         require_gpu=args.require_gpu,
     )
 
@@ -731,8 +743,17 @@ def main():
         jax.block_until_ready(runner_state.train_state.params)
         current_step = 0
 
-    chunk_size = config.checkpoint_interval
+    chunk_size = config.chunk_size if config.chunk_size > 0 else config.checkpoint_interval
     num_updates = config.num_updates
+    checkpoint_interval_sec = config.checkpoint_interval_seconds
+
+    last_save_time = time.time()
+    best_return = -1e9
+    plateau_count = 0
+    plateau_patience = config.plateau_patience
+
+    print(f"Time-based Checkpointing: {checkpoint_interval_sec}s (~{checkpoint_interval_sec/60:.1f} min)", flush=True)
+    print(f"JIT Scan Chunk Size: {chunk_size} updates", flush=True)
 
     # Outer Python Loop: executes in chunk_size increments and automatically saves Orbax checkpoints
     while current_step < num_updates:
@@ -743,20 +764,73 @@ def main():
         jax.block_until_ready(runner_state.train_state.params)
         current_step += this_chunk
 
-        # Automatic checkpoint saving at every chunk completion
-        step_dir = save_checkpoint_orbax(
-            runner_state.train_state.params, config, current_step, runner_state=runner_state
-        )
-        print(f"[Loop Progress] Completed {current_step}/{num_updates} updates (Checkpoint saved)", flush=True)
+        now = time.time()
+        elapsed_since_save = now - last_save_time
 
-        if config.on_checkpoint_cmd:
-            try:
-                cmd_to_run = config.on_checkpoint_cmd.format(step=current_step, step_dir=step_dir)
-                ret = subprocess.run(cmd_to_run, shell=True, check=False)
-                if ret.returncode != 0:
-                    print(f"[WARN] on_checkpoint_cmd returned non-zero exit code: {ret.returncode}", flush=True)
-            except Exception as cb_err:
-                print(f"[WARN] on_checkpoint_cmd warning: {cb_err}", flush=True)
+        # Check early stopping / convergence conditions
+        if "entropy" in chunk_metrics and "mean_return" in chunk_metrics:
+            cur_entropy = float(chunk_metrics["entropy"][-1])
+            cur_return = float(chunk_metrics["mean_return"][-1])
+            cur_survival = float(chunk_metrics["survival_rate"][-1]) if "survival_rate" in chunk_metrics else 0.0
+
+            # 1. Overfitting / Policy Collapse Check
+            if cur_entropy < 0.03:
+                print(f"\n[Overfitting Watchdog] Policy entropy collapsed ({cur_entropy:.4f} < 0.03). Stopping training early.", flush=True)
+                step_dir = save_checkpoint_orbax(
+                    runner_state.train_state.params, config, current_step, runner_state=runner_state
+                )
+                if config.on_checkpoint_cmd:
+                    try:
+                        cmd_to_run = config.on_checkpoint_cmd.format(step=current_step, step_dir=step_dir)
+                        subprocess.run(cmd_to_run, shell=True, check=False)
+                    except Exception:
+                        pass
+                break
+
+            # 2. Convergence & Plateau Check (only when surviving consistently)
+            if cur_survival >= 0.95:
+                if cur_return > best_return + 0.5:
+                    best_return = cur_return
+                    plateau_count = 0
+                else:
+                    plateau_count += 1
+                    if plateau_count >= plateau_patience:
+                        print(f"\n[Plateau Watchdog] Policy converged and plateaued (no return gains over {plateau_patience} checks). Stopping training as further updates are meaningless.", flush=True)
+                        step_dir = save_checkpoint_orbax(
+                            runner_state.train_state.params, config, current_step, runner_state=runner_state
+                        )
+                        if config.on_checkpoint_cmd:
+                            try:
+                                cmd_to_run = config.on_checkpoint_cmd.format(step=current_step, step_dir=step_dir)
+                                subprocess.run(cmd_to_run, shell=True, check=False)
+                            except Exception:
+                                pass
+                        break
+
+        # Time-based or step-based checkpointing
+        should_save = False
+        if checkpoint_interval_sec > 0:
+            if elapsed_since_save >= checkpoint_interval_sec or current_step >= num_updates:
+                should_save = True
+        else:
+            if (current_step % config.checkpoint_interval == 0) or (current_step >= num_updates):
+                should_save = True
+
+        if should_save:
+            step_dir = save_checkpoint_orbax(
+                runner_state.train_state.params, config, current_step, runner_state=runner_state
+            )
+            print(f"[Loop Progress] Completed {current_step}/{num_updates} updates | Checkpoint saved ({elapsed_since_save:.1f}s elapsed)", flush=True)
+            last_save_time = now
+
+            if config.on_checkpoint_cmd:
+                try:
+                    cmd_to_run = config.on_checkpoint_cmd.format(step=current_step, step_dir=step_dir)
+                    ret = subprocess.run(cmd_to_run, shell=True, check=False)
+                    if ret.returncode != 0:
+                        print(f"[WARN] on_checkpoint_cmd returned non-zero exit code: {ret.returncode}", flush=True)
+                except Exception as cb_err:
+                    print(f"[WARN] on_checkpoint_cmd warning: {cb_err}", flush=True)
 
     total_time = time.perf_counter() - t0
     total_sim_steps = config.num_envs * config.num_steps * config.num_updates

@@ -155,26 +155,28 @@ class CloudJaxManager:
     def run_training(
         self,
         mode: int = 1,
-        num_envs: Optional[int] = None,
+        num_envs: Optional[int] = 16384,
         num_steps: int = 64,
-        num_updates: int = 3000,
+        num_updates: int = 50000,
         checkpoint_interval: int = 1000,
+        checkpoint_interval_seconds: float = 600.0,
+        chunk_size: int = 200,
         seed: int = 42,
-        accelerator: str = "tpu",
+        accelerator: str = "gpu",
         tpu_type: str = "v5e1",
         gpu_type: str = "T4",
-        dtype: str = "bfloat16"
+        dtype: str = "float16"
     ) -> bool:
         """Executes full training pipeline on Colab with auto-rotation."""
-        # Auto-configure num_envs if omitted
+        # Auto-configure num_envs to 16,384 by default
         if num_envs is None:
-            num_envs = 16384 if accelerator == "tpu" else 4096
+            num_envs = 16384
 
         if accelerator == "gpu":
             dtype = resolve_gpu_dtype(gpu_type, dtype)
 
         print("=" * 68, flush=True)
-        print(" 🎮 Maple-Gymnax Cloud Training Orchestrator (1M+ SPS TPU/GPU Target)", flush=True)
+        print(" 🎮 Maple-Gymnax Cloud Training Orchestrator (1M+ SPS GPU Target)", flush=True)
         print("=" * 68, flush=True)
 
         # Locate verified resume checkpoint if resuming after rotation or available
@@ -193,6 +195,7 @@ class CloudJaxManager:
 
         print(f"[*] Active Colab Account: {acc_name} ({acc_id})", flush=True)
         print(f"[*] Target Accelerator: {accelerator.upper()} (Envs: {num_envs:,} | Precision: {dtype})", flush=True)
+        print(f"[*] Time-based Save Interval: {checkpoint_interval_seconds}s (~{checkpoint_interval_seconds/60:.1f} min)", flush=True)
 
         # 3. Start tunnel
         self.tunnel_manager = JaxTunnelTransferManager(
@@ -228,6 +231,8 @@ class CloudJaxManager:
             "--num_steps", str(num_steps),
             "--num_updates", str(num_updates),
             "--checkpoint_interval", str(checkpoint_interval),
+            "--checkpoint_interval_seconds", str(checkpoint_interval_seconds),
+            "--chunk_size", str(chunk_size),
             "--seed", str(seed),
             "--dtype", str(dtype),
         ] + extra_remote_args
@@ -277,13 +282,21 @@ class CloudJaxManager:
                 next_acc = cam.switch_next_account()
                 if next_acc:
                     print(f"[COMBO] Switched to next account '{next_acc.get('name')}'. Retrying on {next_acc.get('name')}...", flush=True)
-                    return self.run_training(mode, num_envs, num_steps, num_updates, checkpoint_interval, seed, accelerator, tpu_type, gpu_type, dtype)
+                    return self.run_training(
+                        mode=mode,
+                        num_envs=num_envs,
+                        num_steps=num_steps,
+                        num_updates=num_updates,
+                        checkpoint_interval=checkpoint_interval,
+                        checkpoint_interval_seconds=checkpoint_interval_seconds,
+                        chunk_size=chunk_size,
+                        seed=seed,
+                        accelerator=accelerator,
+                        tpu_type=tpu_type,
+                        gpu_type=gpu_type,
+                        dtype=dtype
+                    )
                 else:
-                    if accelerator == "tpu":
-                        print("[FALLBACK] TPU unavailable across account pool. Falling back to GPU (T4)...", flush=True)
-                        cam.reset_all_quotas()
-                        gpu_dtype = resolve_gpu_dtype("T4", dtype)
-                        return self.run_training(mode, 4096, num_steps, num_updates, checkpoint_interval, seed, "gpu", tpu_type, "T4", gpu_dtype)
                     print("[ERROR] All Colab accounts in combo pool are exhausted.", flush=True)
                     return False
 
@@ -303,15 +316,16 @@ class CloudJaxManager:
 
 def main():
     parser = argparse.ArgumentParser(description="Maple-Gymnax Cloud Training Runner")
-    parser.add_argument("--accelerator", type=str, default="tpu", choices=["tpu", "gpu"], help="Accelerator target (tpu or gpu)")
-    parser.add_argument("--tpu_type", type=str, default="v5e1", help="TPU type (v5e1, v6e1)")
+    parser.add_argument("--accelerator", type=str, default="gpu", choices=["gpu", "tpu"], help="Accelerator target (gpu or tpu)")
     parser.add_argument("--gpu_type", type=str, default="T4", help="GPU accelerator (T4, A100, L4)")
     parser.add_argument("--mode", type=int, default=1, help="0: Classic, 1: Remastered, 2: Hybrid")
-    parser.add_argument("--num_envs", type=int, default=None, help="Parallel environments (default: 16384 on TPU, 4096 on GPU)")
+    parser.add_argument("--num_envs", type=int, default=16384, help="Parallel environments (default: 16384)")
     parser.add_argument("--num_steps", type=int, default=64, help="Rollout steps")
-    parser.add_argument("--num_updates", type=int, default=3000, help="Updates count")
-    parser.add_argument("--checkpoint_interval", type=int, default=1000, help="Checkpoint interval")
-    parser.add_argument("--dtype", type=str, default="bfloat16", choices=["float32", "bfloat16"], help="Compute precision")
+    parser.add_argument("--num_updates", type=int, default=50000, help="Updates count (50,000 = ~524억 환경 스텝)")
+    parser.add_argument("--checkpoint_interval", type=int, default=1000, help="Checkpoint interval in updates")
+    parser.add_argument("--checkpoint_interval_seconds", type=float, default=600.0, help="Time-based save interval (default: 600s = 10 min)")
+    parser.add_argument("--chunk_size", type=int, default=200, help="JIT scan chunk size")
+    parser.add_argument("--dtype", type=str, default="float16", choices=["float32", "bfloat16", "float16"], help="Compute precision")
     parser.add_argument("--seed", type=int, default=42, help="PRNG seed")
     args = parser.parse_args()
 
@@ -322,9 +336,11 @@ def main():
         num_steps=args.num_steps,
         num_updates=args.num_updates,
         checkpoint_interval=args.checkpoint_interval,
+        checkpoint_interval_seconds=args.checkpoint_interval_seconds,
+        chunk_size=args.chunk_size,
         seed=args.seed,
         accelerator=args.accelerator,
-        tpu_type=args.tpu_type,
+        tpu_type="v5e1",
         gpu_type=args.gpu_type,
         dtype=args.dtype
     )
