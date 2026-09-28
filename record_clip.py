@@ -136,4 +136,22 @@ def record_policy_clip(
 
 
 if __name__ == "__main__":
-    record_policy_clip()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Headless Policy Recorder for MapleStory Lotus Phase 1")
+    parser.add_argument("--checkpoint_path", type=str, default="checkpoints/mode_1/step_3000", help="Path to checkpoint")
+    parser.add_argument("--mode", type=int, default=1, choices=[0, 1, 2], help="Environment mode (0: Classic, 1: Remastered, 2: Hybrid)")
+    parser.add_argument("--num_frames", type=int, default=360, help="Number of frames to record (e.g. 360 = 6 seconds at 60 FPS)")
+    parser.add_argument("--frame_stride", type=int, default=3, help="Subsample stride for GIF (3 = 20 FPS)")
+    parser.add_argument("--output_gif", type=str, default="assets/policy_step3000_preview.gif", help="Output GIF path")
+    parser.add_argument("--output_png", type=str, default="assets/policy_step3000_preview.png", help="Output keyframe PNG path")
+
+    args = parser.parse_args()
+    record_policy_clip(
+        checkpoint_path=args.checkpoint_path,
+        mode=args.mode,
+        num_frames=args.num_frames,
+        frame_stride=args.frame_stride,
+        output_gif=args.output_gif,
+        output_png=args.output_png,
+    )

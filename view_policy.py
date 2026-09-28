@@ -458,12 +458,22 @@ def load_trained_policy(checkpoint_path: str, mode: int) -> Tuple[Any, Any]:
     if not os.path.exists(abs_path):
         raise FileNotFoundError(f"Checkpoint path not found: {abs_path}")
 
-    checkpointer = ocp.StandardCheckpointer()
-    restored_params = checkpointer.restore(abs_path)
-    checkpointer.close()
-
     action_dim = 7
     network = ActorCritic(action_dim=action_dim)
+
+    # Initialize dummy target PyTree template to prevent cross-device topology mismatch
+    # (e.g. restoring GPU-trained checkpoint on CPU)
+    obs_dim = 142 if mode in (MODE_REMASTERED, MODE_HYBRID) else 130
+    dummy_obs = jnp.zeros((1, obs_dim), dtype=jnp.float32)
+    dummy_params = network.init(jax.random.PRNGKey(0), dummy_obs)
+
+    checkpointer = ocp.StandardCheckpointer()
+    try:
+        restored_params = checkpointer.restore(abs_path, target=dummy_params)
+    except Exception:
+        restored_params = checkpointer.restore(abs_path)
+    checkpointer.close()
+
     print(f"[PolicyViewer] Successfully restored checkpoint from: {abs_path}")
     return restored_params, network
 
