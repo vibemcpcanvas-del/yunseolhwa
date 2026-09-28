@@ -86,7 +86,7 @@ def record_policy_clip(
 
         # 4. Render
         surface.fill(COLOR_BG)
-        draw_arena(surface, params)
+        draw_arena(surface, params, host_state)
         draw_remastered_hazards(surface, host_state, params)
         draw_boss_core(surface, host_state, params)
         draw_falling_debris(surface, host_state)

@@ -253,7 +253,7 @@ def _step_falling_debris(
     slot_idx = jnp.argmax(inactive)
     can_spawn = should_spawn & jnp.any(inactive)
 
-    cand_x = jax.random.uniform(k_x, minval=params.wall_left + 50.0, maxval=params.wall_right - 50.0)
+    cand_x = jax.random.uniform(k_x, minval=params.wall_left, maxval=params.wall_right)
     cand_vy = jax.random.uniform(k_vy, minval=params.debris_min_vy, maxval=params.debris_max_vy)
     type_idx = jax.random.randint(k_t, shape=(), minval=0, maxval=3)
     radii = jnp.array([16.0, 24.0, 36.0])
@@ -505,7 +505,8 @@ def _compute_reward(
 
     # --- Core Survival ---
     r_base = 0.03
-    r_hit = jnp.where(took_hit, -100.0, 0.0)
+    r_hit = jnp.where(took_hit, -30.0, 0.0)
+    r_death = jnp.where(hp_next <= 0.0, -70.0, 0.0)
     r_hp = 0.02 * (hp_next / params.player_max_hp)
 
     # --- Friendly Fire Gimmick (primary learning signal) ---
@@ -526,14 +527,15 @@ def _compute_reward(
 
     # --- Anti-Wall-Camping Penalty ---
     # Penalise hugging left/right walls outside of overload phases.
+    # wall_margin = 220px covers x < 320 and x > 1046 (including the x >= 1150 safe zone)
     # During overload the agent SHOULD camp near the right wall (safe zone).
-    wall_margin = 150.0
+    wall_margin = 220.0
     near_left_wall = px_next < (params.wall_left + wall_margin)
     near_right_wall = px_next > (params.wall_right - wall_margin)
     near_any_wall = near_left_wall | near_right_wall
     r_wall = jnp.where(
         near_any_wall & (~is_overload_next) & is_remastered_or_hybrid,
-        -0.15,
+        -0.30,
         0.0,
     )
 
@@ -552,7 +554,7 @@ def _compute_reward(
     )
 
     return (
-        r_base + r_hit + r_hp
+        r_base + r_hit + r_death + r_hp
         + r_boss_hit + r_shield
         + r_overload + r_gauge + r_safe_zone
         + r_wall + r_bait

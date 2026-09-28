@@ -166,8 +166,8 @@ def draw_dashed_vertical_line(
         cur_y += dash_len + gap_len
 
 
-def draw_arena(surface: pygame.Surface, params: EnvParams) -> None:
-    """Renders boundaries, floor platform, and Remastered safe-zone indicator."""
+def draw_arena(surface: pygame.Surface, params: EnvParams, state: Optional[HostEnvState] = None) -> None:
+    """Renders boundaries, floor platform, and Remastered safe-zone indicator (only active during Overload)."""
     w_left = int(params.wall_left)
     w_right = int(params.wall_right)
     floor_y = int(params.floor_y)
@@ -182,13 +182,18 @@ def draw_arena(surface: pygame.Surface, params: EnvParams) -> None:
     pygame.draw.rect(surface, (20, 22, 32), floor_rect)
     pygame.draw.line(surface, COLOR_FLOOR, (w_left, floor_y), (w_right, floor_y), 4)
 
-    # Mode 1/2 Safe Zone Background Tint (x >= safe_zone_x)
+    # Mode 1/2 Safe Zone Background Tint (only active during Overload)
     if params.mode != MODE_CLASSIC:
-        safe_width = w_right - safe_x
-        safe_surf = pygame.Surface((safe_width, floor_y), pygame.SRCALPHA)
-        safe_surf.fill(COLOR_SAFE_ZONE_FILL)
-        surface.blit(safe_surf, (safe_x, 0))
-        draw_dashed_vertical_line(surface, COLOR_SAFE_ZONE_LINE, safe_x, 0, floor_y, dash_len=10, gap_len=6, width=2)
+        is_overload = state.is_overload if state is not None else False
+        if is_overload:
+            safe_width = w_right - safe_x
+            safe_surf = pygame.Surface((safe_width, floor_y), pygame.SRCALPHA)
+            safe_surf.fill(COLOR_SAFE_ZONE_FILL)
+            surface.blit(safe_surf, (safe_x, 0))
+            draw_dashed_vertical_line(surface, COLOR_SAFE_ZONE_LINE, safe_x, 0, floor_y, dash_len=10, gap_len=6, width=2)
+        else:
+            # Subtle faint guideline during normal phase
+            draw_dashed_vertical_line(surface, (40, 50, 60), safe_x, 0, floor_y, dash_len=6, gap_len=10, width=1)
 
 
 def draw_boss_core(surface: pygame.Surface, state: HostEnvState, params: EnvParams) -> None:
@@ -652,7 +657,7 @@ def main() -> None:
         screen.fill(COLOR_BG)
 
         # Layer 1: Arena boundaries and safe zone
-        draw_arena(screen, params)
+        draw_arena(screen, params, host_state)
 
         # Layer 2: Mode-specific Hazards
         if params.mode != MODE_REMASTERED:
