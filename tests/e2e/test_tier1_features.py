@@ -776,9 +776,9 @@ def test_f13_ducking_player_still_takes_damage():
         player_on_ground=True,
         invincible_timer=0.0,
     )
-    from maple_gymnax.envs.common import ACTION_DUCK
-    # Action: DUCK / DOWN
-    _, next_s, _, _, _ = env.step_env(key, ducking_state, ACTION_DUCK, p)
+    from maple_gymnax.envs.common import ACTION_DOWN
+    # Action: DOWN
+    _, next_s, _, _, _ = env.step_env(key, ducking_state, ACTION_DOWN, p)
     assert next_s.player_hp == 0.0
 
 
@@ -1465,7 +1465,8 @@ def test_f25_extreme_jump_velocity_input():
     p = env.default_params.replace(jump_velocity=-2000.0)
     key = jax.random.PRNGKey(0)
     _, s = env.reset_env(key, p)
-    _, next_s, _, _, _ = env.step_env(key, s, 3, p)
+    from maple_gymnax.envs.common import ACTION_JUMP
+    _, next_s, _, _, _ = env.step_env(key, s, ACTION_JUMP, p)
     assert not jnp.isnan(next_s.player_vy)
 
 

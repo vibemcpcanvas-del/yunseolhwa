@@ -1,5 +1,5 @@
 {
-  "active_id": "account_2",
+  "active_id": "account_5",
   "accounts": [
     {
       "id": "account_1",
@@ -11,23 +11,23 @@
     {
       "id": "account_2",
       "name": "구글 계정 2",
-      "status": "READY",
-      "updated_at": "2026-09-29 13:29:56",
-      "last_error": null
+      "status": "QUOTA_EXHAUSTED",
+      "updated_at": "2026-09-29 23:50:27",
+      "last_error": "Quota exhausted"
     },
     {
       "id": "account_3",
       "name": "구글 계정 3",
-      "status": "READY",
-      "updated_at": "2026-09-29 13:29:56",
-      "last_error": null
+      "status": "QUOTA_EXHAUSTED",
+      "updated_at": "2026-09-29 23:52:55",
+      "last_error": "Quota exhausted"
     },
     {
       "id": "account_4",
       "name": "구글 계정 4",
-      "status": "READY",
-      "updated_at": "2026-09-29 13:29:56",
-      "last_error": null
+      "status": "QUOTA_EXHAUSTED",
+      "updated_at": "2026-09-29 23:54:02",
+      "last_error": "Quota exhausted"
     },
     {
       "id": "account_5",

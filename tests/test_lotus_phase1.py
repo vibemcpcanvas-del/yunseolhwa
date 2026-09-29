@@ -19,6 +19,7 @@ import jax.numpy as jnp
 import pytest
 
 from maple_gymnax.envs.common import (
+    ACTION_DOWN,
     ACTION_DUCK,
     ACTION_JUMP,
     ACTION_JUMP_LEFT,
@@ -662,4 +663,179 @@ class TestEpisodeLifecycle:
         assert total_boss_hit_reward == 50.0, (
             f"보스 적중 보상이 1회성이 아닙니다: 누적 {total_boss_hit_reward}"
         )
+
+
+# =============================================================================
+# 9. R1 & R2: Action Cost, Jitter Regularization & Threat-Gated Evasion Rewards
+# =============================================================================
+
+class TestMicroMovementRewardShapingR1R2:
+    """Verifies analytical reward deltas for R1 and R2 micro-movement shaping."""
+
+    def test_action_jump_cost_analytical_delta(self):
+        """R1: Verifies jump action cost imparts exact -0.05 delta on actions {4, 5, 6} vs ground actions."""
+        env = LotusPhase1Env()
+        params = env.default_params.replace(mode=MODE_CLASSIC)
+        key = jax.random.PRNGKey(42)
+        _, init_state = env.reset_env(key, params)
+
+        # Baseline: Ground action (NOOP, 0) with matching last_action=0 (no jitter penalty)
+        s_noop = init_state.replace(last_action=ACTION_NOOP, debris_active=jnp.zeros(MAX_DEBRIS, dtype=bool))
+        _, _, r_noop, _, _ = env.step_env(key, s_noop, ACTION_NOOP, params)
+
+        # Jump action (JUMP, 4) with matching last_action=4 (no jitter penalty)
+        s_jump = init_state.replace(last_action=ACTION_JUMP, debris_active=jnp.zeros(MAX_DEBRIS, dtype=bool))
+        _, _, r_jump, _, _ = env.step_env(key, s_jump, ACTION_JUMP, params)
+
+        # Delta must match r_action_jump_cost = -0.05 analytically
+        # r_noop - r_jump = 0.0 - (-0.05) = +0.05
+        assert abs((float(r_noop) - float(r_jump)) - 0.05) < 1e-4
+
+        # Jump Left (5) and Jump Right (6) also incur exact -0.05 action cost
+        s_jl = init_state.replace(last_action=ACTION_JUMP_LEFT, debris_active=jnp.zeros(MAX_DEBRIS, dtype=bool))
+        _, _, r_jl, _, _ = env.step_env(key, s_jl, ACTION_JUMP_LEFT, params)
+        assert abs((float(r_noop) - float(r_jl)) - 0.05) < 1e-4
+
+        s_jr = init_state.replace(last_action=ACTION_JUMP_RIGHT, debris_active=jnp.zeros(MAX_DEBRIS, dtype=bool))
+        _, _, r_jr, _, _ = env.step_env(key, s_jr, ACTION_JUMP_RIGHT, params)
+        assert abs((float(r_noop) - float(r_jr)) - 0.05) < 1e-4
+
+    def test_jitter_regularization_analytical_delta(self):
+        """R1: Verifies switching action incurs exact r_jitter_cost = -0.02 delta."""
+        env = LotusPhase1Env()
+        params = env.default_params.replace(mode=MODE_CLASSIC)
+        key = jax.random.PRNGKey(42)
+        _, init_state = env.reset_env(key, params)
+
+        # Compare repeating NOOP (last_action=0, action=0) vs switching to DOWN (last_action=0, action=3)
+        # Both are ground actions with zero horizontal movement (vx=0, px_next=px), zero jump cost
+        s_base = init_state.replace(last_action=ACTION_NOOP, debris_active=jnp.zeros(MAX_DEBRIS, dtype=bool))
+        _, _, r_same, _, _ = env.step_env(key, s_base, ACTION_NOOP, params)
+        _, _, r_switch, _, _ = env.step_env(key, s_base, ACTION_DOWN, params)
+
+        # Difference must match r_jitter_cost = -0.02
+        # r_same - r_switch = 0.0 - (-0.02) = +0.02
+        assert abs((float(r_same) - float(r_switch)) - 0.02) < 1e-4
+
+    def test_overhead_airborne_hazard_penalty_analytical_delta(self):
+        """R2: Verifies jumping under high-threat overhead debris incurs -0.35 anti-jump penalty."""
+        env = LotusPhase1Env()
+        params = env.default_params.replace(mode=MODE_CLASSIC)
+        key = jax.random.PRNGKey(42)
+        _, init_state = env.reset_env(key, params)
+
+        # Setup high-threat debris (radius=24.0, Type 1) directly overhead:
+        # Player at floor_y=605.0, debris at x=player_x, y=500.0 (dy = 605 - 500 = 105 in [0, 180], dx = 0 < 45)
+        deb_x = jnp.zeros(MAX_DEBRIS, dtype=jnp.float32).at[0].set(init_state.player_x)
+        deb_y = jnp.zeros(MAX_DEBRIS, dtype=jnp.float32).at[0].set(500.0)
+        deb_r = jnp.zeros(MAX_DEBRIS, dtype=jnp.float32).at[0].set(24.0)
+        deb_act = jnp.zeros(MAX_DEBRIS, dtype=bool).at[0].set(True)
+
+        s_hazard = init_state.replace(
+            debris_x=deb_x,
+            debris_y=deb_y,
+            debris_radius=deb_r,
+            debris_active=deb_act,
+            debris_vy=jnp.zeros(MAX_DEBRIS, dtype=jnp.float32),  # stationary debris for pure reward isolation
+            invincible_timer=10.0,  # avoid damage penalty
+        )
+
+        # When player remains grounded (NOOP, last_action=NOOP):
+        # has_overhead_threat is True, but on_ground_next is True -> r_airborne_hazard = 0.0
+        _, _, r_grounded, _, _ = env.step_env(key, s_hazard.replace(last_action=ACTION_NOOP), ACTION_NOOP, params)
+
+        # When player jumps (JUMP, last_action=JUMP):
+        # has_overhead_threat is True, on_ground_next is False -> r_airborne_hazard = -0.35, r_action_jump = -0.05
+        _, _, r_jump, _, _ = env.step_env(key, s_hazard.replace(last_action=ACTION_JUMP), ACTION_JUMP, params)
+
+        # Total delta between grounded and jumping under overhead hazard:
+        # r_grounded - r_jump = 0.0 - (-0.05 + -0.35) = +0.40
+        assert abs((float(r_grounded) - float(r_jump)) - 0.40) < 1e-4
+
+        # Net airborne hazard penalty contribution is strictly 0.35:
+        # (r_grounded - r_jump) - jump_cost = 0.40 - 0.05 = 0.35
+        hazard_delta = (float(r_grounded) - float(r_jump)) - abs(params.r_action_jump_cost)
+        assert abs(hazard_delta - abs(params.r_airborne_hazard_cost)) < 1e-4
+
+    def test_tap_dodge_clearance_bonus_analytical_delta(self):
+        """R2: Verifies grounded lateral movement expanding separation from overhead hazard awards +0.25 bonus."""
+        env = LotusPhase1Env()
+        params = env.default_params.replace(mode=MODE_CLASSIC)
+        key = jax.random.PRNGKey(42)
+        _, init_state = env.reset_env(key, params)
+
+        # Setup overhead threat slightly to the left of the player:
+        # Player at x=600.0, debris at x=590.0 (dx_prev = 10.0 < 45.0, dy = 105.0)
+        p_x = 600.0
+        deb_x = jnp.zeros(MAX_DEBRIS, dtype=jnp.float32).at[0].set(590.0)
+        deb_y = jnp.zeros(MAX_DEBRIS, dtype=jnp.float32).at[0].set(500.0)
+        deb_r = jnp.zeros(MAX_DEBRIS, dtype=jnp.float32).at[0].set(24.0)
+        deb_act = jnp.zeros(MAX_DEBRIS, dtype=bool).at[0].set(True)
+
+        s_dodge_setup = init_state.replace(
+            player_x=p_x,
+            debris_x=deb_x,
+            debris_y=deb_y,
+            debris_radius=deb_r,
+            debris_active=deb_act,
+            debris_vy=jnp.zeros(MAX_DEBRIS, dtype=jnp.float32),
+            invincible_timer=10.0,
+        )
+
+        # Case 1: Moving away to the RIGHT (last_action=RIGHT, action=RIGHT)
+        # vx = +400, dx_next = |606.67 - 590| = 16.67 > dx_prev (10.0)
+        # on_ground_next = True -> can_tap_dodge = True -> r_tap_dodge = +0.25
+        s_right = s_dodge_setup.replace(last_action=ACTION_RIGHT)
+        _, _, r_dodge_away, _, _ = env.step_env(key, s_right, ACTION_RIGHT, params)
+
+        # Case 2: Moving closer to the LEFT (last_action=LEFT, action=LEFT)
+        # vx = -400, dx_next = |593.33 - 590| = 3.33 < dx_prev (10.0)
+        # moving_away = False -> can_tap_dodge = False -> r_tap_dodge = 0.0
+        s_left = s_dodge_setup.replace(last_action=ACTION_LEFT)
+        _, _, r_move_toward, _, _ = env.step_env(key, s_left, ACTION_LEFT, params)
+
+        # Case 3: Stationary (last_action=NOOP, action=NOOP)
+        # dx_next = dx_prev = 10.0 (not > dx_prev) -> can_tap_dodge = False -> r_tap_dodge = 0.0
+        s_noop = s_dodge_setup.replace(last_action=ACTION_NOOP)
+        _, _, r_stationary, _, _ = env.step_env(key, s_noop, ACTION_NOOP, params)
+
+        # Tap-dodge clearance bonus delta:
+        # In classic mode, r_dodge_away has +0.25 bonus compared to stationary or moving toward
+        assert abs((float(r_dodge_away) - float(r_move_toward)) - 0.25) < 1e-4
+        assert abs((float(r_dodge_away) - float(r_stationary)) - 0.25) < 1e-4
+
+    def test_debris_repel_scale_gaussian_potential_delta(self):
+        """R2: Verifies continuous overhead Gaussian potential scales with debris_repel_scale = -0.30."""
+        env = LotusPhase1Env()
+        # Repulsion potential is active in Remastered / Hybrid mode (params.mode != MODE_CLASSIC)
+        key = jax.random.PRNGKey(42)
+
+        # Debris directly overhead at dx = 0 (exp(-0) = 1.0), large debris r = 36.0 (r/36 = 1.0)
+        # overhead_weight = 1.0
+        p_x = 683.0  # center arena
+        deb_x = jnp.zeros(MAX_DEBRIS, dtype=jnp.float32).at[0].set(p_x)
+        deb_y = jnp.zeros(MAX_DEBRIS, dtype=jnp.float32).at[0].set(500.0)
+        deb_r = jnp.zeros(MAX_DEBRIS, dtype=jnp.float32).at[0].set(36.0)
+        deb_act = jnp.zeros(MAX_DEBRIS, dtype=bool).at[0].set(True)
+
+        params_scaled = env.default_params.replace(mode=MODE_REMASTERED, debris_repel_scale=-0.30)
+        params_zero = env.default_params.replace(mode=MODE_REMASTERED, debris_repel_scale=0.0)
+
+        _, init_state = env.reset_env(key, params_scaled)
+        s_test = init_state.replace(
+            player_x=p_x,
+            debris_x=deb_x,
+            debris_y=deb_y,
+            debris_radius=deb_r,
+            debris_active=deb_act,
+            debris_vy=jnp.zeros(MAX_DEBRIS, dtype=jnp.float32),
+            invincible_timer=10.0,
+            last_action=ACTION_NOOP,
+        )
+
+        _, _, r_scaled, _, _ = env.step_env(key, s_test, ACTION_NOOP, params_scaled)
+        _, _, r_zero, _, _ = env.step_env(key, s_test, ACTION_NOOP, params_zero)
+
+        # Delta must exactly match params.debris_repel_scale * overhead_weight = -0.30 * 1.0 = -0.30
+        assert abs((float(r_scaled) - float(r_zero)) - (-0.30)) < 1e-4
 

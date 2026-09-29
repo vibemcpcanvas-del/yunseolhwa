@@ -52,12 +52,17 @@ Autonomous Micro-Movement & Threat-Gated Evasion: Eliminating jump-spam local mi
 | worker_m1_m2 | teamwork_preview_worker | Implement R1 & R2 in lotus_phase1.py & common.py | failed (replaced) | c136ad97-79be-4d84-b10d-e4d2ec0f7cad |
 | worker_m3 | teamwork_preview_worker | Implement R3 in train_ppo.py & pyproject.toml | completed | 8fa6b38e-4fb2-4739-bc58-b4fe81c42a0d |
 | test_writer_m4 | teamwork_preview_test_writer | Author TEST_INFRA.md, test_micro_movement, eval_gates.py | completed | 09055244-a278-4e6c-9dfb-a2a189649426 |
-| worker_m1_m2_gen2 | teamwork_preview_worker | Implement R1 & R2 in lotus_phase1.py & common.py | in-progress | 129a5034-4e35-4453-bda6-a9d0fafa0864 |
+| worker_m1_m2_gen2 | teamwork_preview_worker | Implement R1 & R2 in lotus_phase1.py & common.py | completed | 129a5034-4e35-4453-bda6-a9d0fafa0864 |
+| reviewer_1 | teamwork_preview_reviewer | Review code and unit tests | in-progress | 2505c43e-54da-40f8-aa87-6bf584c2049c |
+| reviewer_2 | teamwork_preview_reviewer | Review E2E tests and regression safety | in-progress | 729d7f32-8cd1-4fbe-ada3-1f2917e114ed |
+| challenger_1 | teamwork_preview_challenger | Stress-test physics, action costs & JIT | in-progress | 92bd0be9-c8e3-487c-a3d9-9ab1d65de757 |
+| challenger_2 | teamwork_preview_challenger | Stress-test telemetry and eval_gates.py | in-progress | a7f449c1-8407-4781-b26b-0b63e49df014 |
+| auditor_1 | teamwork_preview_auditor | Forensic integrity verification | in-progress | 93147d28-df3e-4b71-84ac-59680df9108b |
 
 ## Succession Status
 - Succession required: no
-- Spawn count: 7 / 16
-- Pending subagents: 129a5034-4e35-4453-bda6-a9d0fafa0864
+- Spawn count: 12 / 16
+- Pending subagents: 2505c43e-54da-40f8-aa87-6bf584c2049c, 729d7f32-8cd1-4fbe-ada3-1f2917e114ed, 92bd0be9-c8e3-487c-a3d9-9ab1d65de757, a7f449c1-8407-4781-b26b-0b63e49df014, 93147d28-df3e-4b71-84ac-59680df9108b
 - Predecessor: none
 - Successor: not yet spawned
 

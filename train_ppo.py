@@ -86,6 +86,7 @@ class PPOConfig:
     resume_from: Optional[str] = None
     allow_precision_loss: bool = False
     checkpoint_interval_seconds: float = 600.0  # Time-based save interval (seconds, default 10 min)
+    chunk_size: int = 200  # Number of updates per JIT scan chunk
     plateau_patience: int = 15  # Plateau patience counter
     require_gpu: bool = False
     evasion_only: bool = False  # Curriculum Mode: Pure Evasion Mastery (Zero-Attacking)
