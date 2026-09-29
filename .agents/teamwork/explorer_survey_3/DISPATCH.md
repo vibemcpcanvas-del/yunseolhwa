@@ -1,29 +1,27 @@
-## 2026-09-26T15:27:20Z
+## 2026-09-29T11:30:19Z
 
-You are Survey Explorer 3 (teamwork_preview_explorer).
-Working directory: c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_3\
-Original Request: c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\ORIGINAL_REQUEST.md
-You MUST read ORIGINAL_REQUEST.md first.
-Your objective is to investigate:
-1. Workspace python environment: Check installed python / uv / jax / flax / gymnax versions and dependencies in bold-faraday. Check if uv venv --python 3.12 exists or needs creation.
-2. RL Framework Wrappers:
-   - FlattenObservationWrapper for PureJaxRL compatibility (flattening player coordinates, hp, laser angle, debris positions/masks into 1D float array).
-   - Rollout runner using jax.vmap and jax.lax.scan for high-speed batched episode collection.
-   - Stoix/Stoa adapter interface (AutoResetWrapper, episode metric logger).
-   - Flashbax Pytree replay buffer zero-copy interface design.
-3. Persona System Prompt requirements (src/maple_gymnax/prompts/persona_system_prompt.py): structure for prompting LLMs to transform unstructured client data into physical tensors and Gymnax code.
-4. SPS Benchmark design (benchmarks/benchmark_sps.py): measuring steps per second across batch sizes (256, 512, 1024, 2048, 4096) on Ryzen 5600X CPU and RX 6600 XT GPU (WSL2 ROCmLab).
-5. Output requirements: Write your comprehensive findings to c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_3\rl_wrappers_bench_spec.md and handoff.md.
-6. Send a message to parent when done.
+You are explorer_survey_3, an Explorer subagent in a Teamwork hierarchy.
+Your working directory is: c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_3
+Your parent is orchestrator_3 (conv ID: e8d54a3b-63f5-4fbd-92da-90a91af57a97).
 
-## 2026-09-26T15:36:21Z
+MANDATORY FIRST STEP:
+Read the authoritative user request at:
+c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\ORIGINAL_REQUEST.md
+Pay special attention to the section dated 2026-09-29T11:28:08Z.
 
-**Context**: ORIGINAL_REQUEST.md updated with Critical Domain Knowledge (MapleStory Lotus Remaster April 2024).
-**Content**: MapleStory Lotus was officially remastered. Patterns 1001-1009 and destruction/overload in C:\mp\Restored_Data\Mob\BossPattern\BossSuu.img.json correspond to this remaster:
-1. Security & Annihilation Gauge (natural increase, 100% -> 25s Overload/Destruction mode with horizontal bombardment 1006-000 & electric field 1006-002).
-2. Friendly fire / boss guidance: Tracking laser (1001-000) & small arm slam (1001-001) hitting player raises gauge; hitting Lotus lowers gauge & breaks shield.
-3. Floor electric discharge (jump avoidance).
-4. Shield generation.
-Modular env design must support both classic (rotating cross laser + falling debris) and remastered (gauge + friendly fire + overload).
-Please re-read ORIGINAL_REQUEST.md lines 54-78.
-**Action**: Incorporate remastered state observation dimensions in FlattenObservationWrapper and ensure persona prompts cover both classic and remastered mechanics.
+TASK OBJECTIVE:
+Investigate requirement R4 and acceptance criteria Gate 1 & Gate 2:
+1. Review the skill instructions:
+   c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\skills\colab-burst-training\SKILL.md
+2. Check existing Colab training scripts, automation tools, or configuration files in the repository (e.g. in `scripts/`, `tools/`, notebooks, or root).
+3. Investigate how training from scratch on Colab T4 GPU pool (`account_1`) is triggered, monitored, and how checkpoints are synced every 1200 updates.
+4. Investigate the evaluation harness for Gate 1 and Gate 2:
+   - Gate 1: greedy evaluation of early checkpoints (`step_4800`+), verifying `JUMP_RIGHT` ratio drops from 53.7% to < 20%, and grounded action ratio (`LEFT`, `RIGHT`, `NOOP`) exceeds 50%.
+   - Gate 2: debris hit count drops from 7.7 hits/ep to <= 3.5 hits/ep, average survival steps exceed 1,200 steps (20.0s), and boss shield damage >= 140 / 200.
+5. Identify existing evaluation scripts or outline the exact script needed to automate greedy evaluation of checkpoints.
+
+OUTPUT REQUIREMENTS:
+- Write detailed survey report to:
+  `c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_3\survey_r4_eval.md`
+- Write your completion handoff to `c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_3\handoff.md`.
+- Send a completion message to orchestrator_3 via `send_message`. Do NOT modify source code files yourself (you are read-only).

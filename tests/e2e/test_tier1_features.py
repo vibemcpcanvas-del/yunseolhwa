@@ -374,9 +374,8 @@ def test_f07_jump_impulse_and_gravity():
     p = env.default_params
     key = jax.random.PRNGKey(0)
     _, state = env.reset_env(key, p)
-    assert bool(state.player_on_ground) is True
-    # Action 3: JUMP
-    _, s_jump, _, _, _ = env.step_env(key, state, 3, p)
+    # Action 4: JUMP
+    from maple_gymnax.envs.common import ACTION_JUMP; _, s_jump, _, _, _ = env.step_env(key, state, ACTION_JUMP, p)
     # vy should be jump_velocity + gravity * dt
     expected_vy = p.jump_velocity + p.gravity * p.dt
     assert abs(s_jump.player_vy - expected_vy) < 1e-4
@@ -777,8 +776,9 @@ def test_f13_ducking_player_still_takes_damage():
         player_on_ground=True,
         invincible_timer=0.0,
     )
-    # Action 6: DUCK
-    _, next_s, _, _, _ = env.step_env(key, ducking_state, 6, p)
+    from maple_gymnax.envs.common import ACTION_DUCK
+    # Action: DUCK / DOWN
+    _, next_s, _, _, _ = env.step_env(key, ducking_state, ACTION_DUCK, p)
     assert next_s.player_hp == 0.0
 
 

@@ -30,19 +30,21 @@ MODE_HYBRID: int = 2
 ACTION_NOOP: int = 0
 ACTION_LEFT: int = 1
 ACTION_RIGHT: int = 2
-ACTION_JUMP: int = 3
-ACTION_JUMP_LEFT: int = 4
-ACTION_JUMP_RIGHT: int = 5
-ACTION_DUCK: int = 6
+ACTION_DOWN: int = 3
+ACTION_DUCK: int = 3  # Backward compatibility alias
+ACTION_JUMP: int = 4
+ACTION_JUMP_LEFT: int = 5
+ACTION_JUMP_RIGHT: int = 6
 
 # Canonical Short Aliases
 NOOP: int = ACTION_NOOP
 LEFT: int = ACTION_LEFT
 RIGHT: int = ACTION_RIGHT
+DOWN: int = ACTION_DOWN
+DUCK: int = ACTION_DOWN
 JUMP: int = ACTION_JUMP
 JUMP_LEFT: int = ACTION_JUMP_LEFT
 JUMP_RIGHT: int = ACTION_JUMP_RIGHT
-DUCK: int = ACTION_DUCK
 
 
 # ---------------------------------------------------------------------------
@@ -188,10 +190,10 @@ def decode_action(
         0: NOOP       -> vx = 0,    h = standard, jump = False
         1: LEFT       -> vx = -spd, h = standard, jump = False
         2: RIGHT      -> vx = +spd, h = standard, jump = False
-        3: JUMP       -> vx = 0,    h = standard, jump = True
-        4: JUMP_LEFT  -> vx = -spd, h = standard, jump = True
-        5: JUMP_RIGHT -> vx = +spd, h = standard, jump = True
-        6: DUCK       -> vx = 0,    h = duck_h,   jump = False
+        3: DOWN/DUCK  -> vx = 0,    h = duck_h,   jump = False
+        4: JUMP       -> vx = 0,    h = standard, jump = True
+        5: JUMP_LEFT  -> vx = -spd, h = standard, jump = True
+        6: JUMP_RIGHT -> vx = +spd, h = standard, jump = True
 
     Returns:
         (vx, current_h, is_jump_action)
@@ -200,7 +202,7 @@ def decode_action(
     is_right = (action == ACTION_RIGHT) | (action == ACTION_JUMP_RIGHT)
     vx = jnp.where(is_left, -player_speed, jnp.where(is_right, player_speed, 0.0))
 
-    is_duck = action == ACTION_DUCK
+    is_duck = action == ACTION_DOWN
     current_h = jnp.where(is_duck, duck_h, standard_h)
 
     is_jump_action = (action == ACTION_JUMP) | (action == ACTION_JUMP_LEFT) | (action == ACTION_JUMP_RIGHT)

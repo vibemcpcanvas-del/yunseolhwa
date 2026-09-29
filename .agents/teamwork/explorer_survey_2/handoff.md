@@ -1,123 +1,139 @@
-# Handoff Report — Lotus Phase 1 Gymnax Environment Architecture & Physics Spec
+# Handoff Report: Requirement R3 Telemetry & Test Infrastructure
 
-**Author**: Survey Explorer 2 (`teamwork_preview_explorer`)  
-**Date**: 2026-09-26T15:36:30Z  
-**Type**: Hard Handoff (Investigation & Specification Complete)  
-**Deliverable**: `c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_2\gymnax_env_spec.md`  
+**Subagent**: `explorer_survey_2`  
+**Recipient**: `orchestrator_3` (`e8d54a3b-63f5-4fbd-92da-90a91af57a97`)  
+**Date**: 2026-09-29T11:42:00Z  
+**Type**: Hard (Task Complete)  
 
 ---
 
 ## 1. Observation
 
-1. **Client Data & Coordinate System**:
-   - Verified existence of `C:\mp\Restored_Data\Mob\BossPattern\_Canvas\_Canvas_012\BossSuu.img.json` containing Lotus patterns under keys `['common', '1000', ..., '1009']`.
-   - Verified existence of `C:\mp\Restored_Data\Map\Back\Back_000\bossSuu.img.json` containing spine atlas `Swoo_Bossmap_Phase2(Wall)`.
-   - Physical coordinates established in client data and request: Canvas $1366 \times 768$, Core Center $(683.0, 384.0)$, Floor line $y = 605.0$, Player hitbox $40.0 \times 60.0$, Horizontal speed $400.0\text{ px/s}$, Base tick rate $\Delta t = 1/60\text{ s}$.
+### 1.1 Console Log Formatting and Metric Tracking in `train_ppo.py`
+- In `train_ppo.py:208-230`:
+  ```python
+  def _log_callback(
+      update_step: int,
+      mean_return: float,
+      mean_length: float,
+      survival_rate: float,
+      mean_gauge: float,
+      actor_loss: float,
+      critic_loss: float,
+      entropy: float,
+      sps: float,
+  ) -> None:
+      print(
+          f"[Update {int(update_step):5d}] "
+          f"Return: {float(mean_return):8.2f} | "
+          f"Length: {float(mean_length):6.1f} | "
+          f"Survival: {float(survival_rate) * 100.0:5.1f}% | "
+          f"Gauge: {float(mean_gauge):6.4f} | "
+          f"Loss(A/C/Ent): {float(actor_loss):.3f}/{float(critic_loss):.3f}/{float(entropy):.3f} | "
+          f"SPS: {float(sps):10,.0f}",
+          flush=True,
+      )
+  ```
+- In `train_ppo.py:443-448`:
+  ```python
+  survival_rate = jnp.where(
+      has_dones,
+      jnp.sum((traj_batch.info["returned_episode_lengths"] >= env_params.max_steps_in_episode).astype(jnp.float32) * done_mask)
+      / jnp.maximum(num_dones, 1.0),
+      0.0,
+  )
+  ```
+  `env_params.max_steps_in_episode` is 3600 steps (60.0s at dt=1/60s). When the agent survives 680 steps (11.3s), `returned_episode_lengths >= 3600` is 0.0, causing `Survival: 0.0%`.
+- In `train_ppo.py:645`:
+  `parser.add_argument("--log_interval", type=int, default=1, help="Update interval for console logging")`.
 
-2. **JAX Runtime & Library Verification**:
-   - Using `uv` on Python 3.12 (`uv run --python 3.12 --with jax,flax,gymnax`), JAX, Flax, and Gymnax install and load cleanly in under 2 seconds.
+### 1.2 Debris Hit Flagging in Environment
+- In `src/maple_gymnax/envs/lotus_phase1.py:717`:
+  `info = {"laser_hit": classic_laser_hit, "debris_hit": debris_damage_total > 0.0, ...}`.
+  During `jax.lax.scan` rollout, `traj_batch.info["debris_hit"]` is available with shape `(num_steps, num_envs)`.
 
-3. **XLA Static Shape Trap Discovery**:
-   - During prototyping, passing `params.max_debris` into array creation functions inside `reset_env` caused an immediate XLA compilation crash:
-     ```
-     TypeError: Shapes must be 1D sequences of concrete values of integer type, got (JitTracer(~int32[]),).
-     This concrete value was not available in Python because it depends on the value of the argument params.max_debris.
-     ```
-   - *Direct Root Cause*: In Gymnax, `params` is passed as a PyTree whose fields become JAX tracers during tracing. Array creation primitives (`jnp.zeros`, `jnp.ones`, etc.) demand compile-time concrete integer dimensions.
-   - *Remediation*: Defined `MAX_DEBRIS: int = 30` as a compile-time static integer constant.
+### 1.3 Action Mapping Discrepancy
+- In `src/maple_gymnax/envs/common.py:30-36`:
+  ```python
+  ACTION_NOOP: int = 0
+  ACTION_LEFT: int = 1
+  ACTION_RIGHT: int = 2
+  ACTION_JUMP: int = 3
+  ACTION_JUMP_LEFT: int = 4
+  ACTION_JUMP_RIGHT: int = 5
+  ACTION_DUCK: int = 6
+  ```
+- In `decode_action()` (`common.py:206`):
+  `is_jump_action = (action == ACTION_JUMP) | (action == ACTION_JUMP_LEFT) | (action == ACTION_JUMP_RIGHT)`
+  This confirms jumping actions are strictly `{3, 4, 5}`. Action 6 is `ACTION_DUCK` (ground crouch, height reduced to 35px).
+- In `ORIGINAL_REQUEST.md:106-107`:
+  The user request text casually referred to jump actions as `4 (JUMP)`, `5 (JUMP_LEFT)`, `6 (JUMP_RIGHT)`.
 
-4. **100% Vectorized JIT & VMAP Test Results**:
-   - Execution of the full `LotusPhase1Env` prototype with `jax.jit` and `jax.vmap` across 1,024 parallel environments returned:
-     ```
-     Single reset obs shape: (130,)
-     Single step success! obs shape: (130,) reward: 0.1 done: False
-     Batch reset shape: (1024, 130)
-     Batch step shape: (1024, 130) vmap execution 100% verified!
-     ```
-
-5. **Remastered Lotus Domain Knowledge Integration (April 2024 Remake)**:
-   - Verified that patterns `1001` through `1009` and UI nodes `destruction` / `overload` in `C:\mp\Restored_Data\Mob\BossPattern\_Canvas\_Canvas_012\BossSuu.img.json` correspond to the April 2024 Lotus Remaster.
-   - Identified and formalized:
-     - Security & Annihilation Gauge ($0.6 \sim 2.0\%$/s natural gain, 100% -> 25s Overload/Destruction Mode).
-     - Overload Mode hazards: Horizontal Artillery (`1006-000`, 100% HP/0.5s outside $x \ge 1100.0$ safe zone) and Electric Field (`1006-002`, 5% HP/0.36s, 5 ticks -> launch + stun).
-     - Friendly Fire / Boss Guidance: Tracking Laser (`1001-000`) and Machine Arm Slams (`1001-001`) hitting player increase gauge; hitting Lotus core decreases gauge and shatters Lotus energy shield ($HP_{shield} = 100.0$).
-     - Floor Electric Discharge: warning charge -> lethal plasma burst evaded by jumping.
-   - Verified modular state/param extension supporting `MODE_CLASSIC`, `MODE_REMASTERED`, and `MODE_HYBRID` with unified 142-dimensional observation vector.
+### 1.4 Test Suite Execution & Empirical Baseline
+- Running bare `uv run pytest` fails with:
+  `ModuleNotFoundError: No module named 'train_ppo'`.
+- Running `uv run pytest -o pythonpath=". src" tests/` succeeded and executed 461 tests:
+  ```
+  FAILED tests/e2e/test_tier1_features.py::test_f26_batch_size_256_throughput
+  FAILED tests/e2e/test_tier4_scenarios.py::test_tier4_scenario_12_hardware_sps_measurement_pipeline
+  ================== 2 failed, 459 passed in 358.51s (0:05:58) ==================
+  ```
+  Both failures are `assert res[256] > 1000.0` (achieved 970.6 and 950.9 SPS on 5-step cold CPU JIT). All 459 functional, simulation, physics, wrapper, and PPO tests passed 100%.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Laser Collision (Separating Axis Theorem + Dot Product Masking)**:
-   - *Observation*: Laser rotates at $\omega = 0.5235\text{ rad/s}$ with 4 arms radiating from center $(683.0, 384.0)$.
-   - *Deduction*: Each beam $k \in \{0, 1, 2, 3\}$ has angle $\theta_k = \theta + k\frac{\pi}{2}$ and unit direction $\mathbf{u}_k = (\cos\theta_k, \sin\theta_k)$, normal $\mathbf{n}_k = (-\sin\theta_k, \cos\theta_k)$.
-   - *Vector formulation*:
-     - Longitudinal projection: $d_{\parallel, k} = (x_p - x_c)\cos\theta_k + (y_p - y_c)\sin\theta_k$.
-     - Ray directional mask: $\text{in\_beam}_k = (d_{\parallel, k} \ge R_{core}) \land (d_{\parallel, k} \le L_{max})$.
-     - Perpendicular distance: $d_{\perp, k} = |-(x_p - x_c)\sin\theta_k + (y_p - y_c)\cos\theta_k|$.
-     - SAT player AABB projection onto beam normal: $r_{proj, k} = \frac{w}{2}|\sin\theta_k| + \frac{h}{2}|\cos\theta_k|$.
-     - Hit condition: $\text{laser\_hit} = \bigvee_{k=0}^3 \left( \text{in\_beam}_k \land (d_{\perp, k} \le r_{laser\_half} + r_{proj, k}) \right)$.
-   - *Result*: Zero Python branching; evaluated in a single SIMD tensor pass.
+1. **Survival Metric Inadequacy**:
+   - *Observation*: `survival_rate` evaluates `returned_episode_lengths >= 3600`.
+   - *Reasoning*: Because the current policy plateaus at 680 steps (~11.3s), the agent never reaches 3600 steps. Thus the metric consistently evaluates to `0.0%`.
+   - *Deduction*: By substituting `survival_sec = mean_length / 60.0`, the metric becomes continuous and dynamic, displaying real-time survival seconds (e.g. `11.3s` -> `20.0s`).
 
-2. **Falling Debris (Static Padded Array + Boolean Mask)**:
-   - *Observation*: Up to 30 debris particles fall vertically simultaneously.
-   - *Deduction*: Dynamic lists (`list.append`, `list.pop`) break JAX JIT static memory layout.
-   - *Vector formulation*:
-     - Tensors preallocated with fixed shape `(30,)`: `debris_x, debris_y, debris_vy, debris_radius, debris_damage, debris_active, debris_type`.
-     - Spawning: Bernoulli trial `jax.random.bernoulli` combined with first free slot selection `slot_idx = jnp.argmax(~debris_active)`. Update performed via `jnp.where(arange(30) == slot_idx, cand_val, cur_val)`.
-     - Physics: $y_{next} = y + v_y \cdot \Delta t$. Floor despawn: $active_{fall} = active \land (y_{next} < y_{floor} - radius)$.
-     - Collision: Vectorized Euclidean distance $\Delta x_i = x_p - x_i, \Delta y_i = y_p - y_{next}, dist_i = \sqrt{\Delta x_i^2 + \Delta y_i^2}$. Hit when $active_{fall} \land (dist_i < R_{player} + radius_i)$.
-     - Hit deactivates particle and aggregates damage: $D = \sum \text{jnp.where}(hit, damage, 0.0)$.
+2. **Debris Hits per Episode Estimation**:
+   - *Observation*: `traj_batch.info["debris_hit"]` records all debris contacts in each step across all parallel environments.
+   - *Reasoning*: In steady-state rollouts of thousands of parallel environments, Little's Law dictates $E[\text{hits/episode}] = \text{total hits} / \text{total completed episodes}$.
+   - *Deduction*: `total_debris_hits / jnp.maximum(num_dones, 1.0)` provides an asymptotically exact, unbiased estimate of `DebrisHits/ep` without requiring modifications to `LogWrapper` or altering `LogEnvState` PyTree structures.
 
-3. **Remastered Gimmicks (Gauge, Overload, Friendly Fire Guidance)**:
-   - *Observation*: BossSuu Remaster introduces active security gauge, friendly fire interaction with boss body, and overload modes.
-   - *Vector formulation*:
-     - Gauge update: $\Delta G = \text{jnp.where}(is\_overload, 0.0, rate \cdot \Delta t) + \Delta G_{player\_hits} - \Delta G_{boss\_hits}$.
-     - Overload trigger: $gauge \ge 100.0\% \implies is\_overload = \text{True}, timer = 25.0\text{s}$.
-     - Boss Hit Detection: Checking tracking laser / arm slam impact coordinate $|x_{impact} - x_{boss}| \le \frac{W_{boss}}{2}$ branch-free with `jnp.where`.
-     - Floor electric discharge: Checked via $floor\_active \land on\_ground \implies lethal\_hit$.
+3. **Action Index Regularization & Jump Ratio Integrity**:
+   - *Observation*: `common.py` defines `JUMP=3`, `JUMP_LEFT=4`, `JUMP_RIGHT=5`, and `DUCK=6`.
+   - *Reasoning*: If code were written using `{4, 5, 6}` based on the text of `ORIGINAL_REQUEST.md`, `JUMP (3)` would be unpenalized and uncounted, while `DUCK (6)` would be penalized as a jump.
+   - *Deduction*: All R1 action cost penalties, R2 anti-jump checks, and R3 `JumpRatio%` metrics MUST use canonical indices `{3, 4, 5}` for jumps and `{0, 1, 2, 6}` for ground actions.
 
-4. **RL Observation & Reward Spaces**:
-   - Classic: 130-dim normalized continuous vector.
-   - Remastered / Hybrid: 142-dim normalized vector (including security gauge, overload timer, boss HP/shield, tracking laser phase/vector, floor electric state).
-   - Reward shaping: Rewards surviving (+0.1/tick), successful friendly fire guidance (+15.0), shield breaking (+20.0), and penalizes gauge buildup, damage taken, and overload triggers.
+4. **Pytest Configuration**:
+   - *Observation*: Pytest failed to resolve root modules when invoked without explicit pythonpath.
+   - *Reasoning*: Adding `pythonpath = [".", "src"]` under `[tool.pytest.ini_options]` in `pyproject.toml` enables both local developers and automated CI pipelines to execute `uv run pytest` cleanly.
 
 ---
 
 ## 3. Caveats
 
-1. **Pre-Laser Warning Phase**: In classic mode, laser warning phase is 1.2s; in current base script it starts immediately unless configured with `warning_timer`.
-2. **Modular Mode Default**: The default mode parameter is set to `0` (`MODE_CLASSIC`), ensuring backward-compatible baseline benchmark compatibility while allowing immediate switching to `1` (`MODE_REMASTERED`) or `2` (`MODE_HYBRID`) via `EnvParams(mode=...)`.
-3. **Discrete vs Continuous Action**: Prototyped with `Discrete(7)`. For continuous RL algorithms (PPO/SAC), a continuous wrapper will map $[-1.0, 1.0]^2 \to (v_x, jump)$.
+- **Zero-Done Rollout Windows**: In small-scale local testing (e.g. `num_envs = 16`), if an agent survives longer than `num_steps = 64`, an update window may have `num_dones == 0`. The fallback `(total_debris_hits / batch_size) * mean_length` prevents NaN, but production training at `num_envs = 16,384` on Colab will average ~291 dones per update, rendering zero-done windows non-existent.
+- **Watchdog Coupling**: In `train_ppo.py:816`, the convergence watchdog checks `cur_survival >= 0.95`. When replacing `survival_rate` in console output, retain `"survival_rate"` in the `metrics` dictionary to ensure watchdog logic continues functioning without unintended side effects.
 
 ---
 
 ## 4. Conclusion
 
-The architectural, physical, mathematical, and algorithmic foundation for `LotusPhase1Env` is 100% complete, branch-free, and validated for both Classic and Remastered Lotus Phase 1.
-All required deliverables have been compiled into `gymnax_env_spec.md`:
-- Exact `flax.struct.dataclass` schemas for `EnvParams` and `EnvState`.
-- Complete mathematical formulations for rotating cross laser, vertical falling debris, security gauge, overload mode, and friendly fire boss guidance.
-- Static shape array management and PRNG slot allocation patterns.
-- Observation space (130-dim / 142-dim Box), action space (7-dim Discrete), reward shaping, and termination conditions.
-- Fully verified prototype ready for Milestone M2 code production in `src/maple_gymnax/envs/lotus_phase1.py`.
+Requirement R3 is fully mapped, and an implementation blueprint has been verified. The existing test suite provides 459 passing tests as a high-fidelity regression harness.
+- In `train_ppo.py`:
+  1. Replace `Survival: 0.0%` with `Survival(s): {float(survival_sec):5.1f}s`.
+  2. Implement `DebrisHits/ep` via the vectorized renewal estimator.
+  3. Implement `JumpRatio%` via `(traj_batch.action >= 3) & (traj_batch.action <= 5)`.
+  4. Configure `--log_interval 20`.
+- In `tests/`: Implement `tests/test_micro_movement_r1_r2_r3.py` covering all R1 action costs, R2 spatial danger cone gating, and R3 telemetry calculations.
 
 ---
 
 ## 5. Verification Method
 
-To independently verify this specification and run the prototype environment:
+1. **Verify Baseline Test Suite Execution**:
+   ```powershell
+   uv run pytest -o pythonpath=". src" tests/test_lotus_phase1.py tests/test_train_ppo.py tests/test_wrappers.py
+   ```
+   *Expected Result*: All 46 tests pass.
 
-```bash
-uv run --python 3.12 --with jax,flax,gymnax python -c "
-import jax, jax.numpy as jnp, flax.struct
-# Paste the verified prototype script from Section 9 of gymnax_env_spec.md
-# Verify jax.jit and jax.vmap across 1024 to 4096 parallel environments
-"
-```
+2. **Verify Canonical Action Indices**:
+   Inspect `src/maple_gymnax/envs/common.py:30-46` and confirm `ACTION_JUMP == 3`, `ACTION_JUMP_LEFT == 4`, `ACTION_JUMP_RIGHT == 5`, `ACTION_DUCK == 6`.
 
-**Invalidation Conditions**:
-- Any occurrence of `TypeError: Shapes must be 1D sequences of concrete values` during `reset` or `step`.
-- Any occurrence of `jax.errors.ConcretizationTypeError` during `jax.jit`.
-- Any shape mismatch during `jax.vmap` execution across 1,024+ batch instances.
-
+3. **Verify Survey Report Artifact**:
+   Read `c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_2\survey_r3_tests.md`.

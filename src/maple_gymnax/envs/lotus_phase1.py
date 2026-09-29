@@ -90,6 +90,13 @@ class EnvParams:
     arm_slam_gauge_gain: float = 0.03
     arm_slam_gauge_reduction: float = 0.03
 
+    # R1 & R2: Action Cost, Regularization & Threat-Gated Evasion Shaping
+    r_action_jump_cost: float = -0.05
+    r_jitter_cost: float = -0.02
+    r_airborne_hazard_cost: float = -0.35
+    r_tap_dodge_bonus: float = 0.25
+    debris_repel_scale: float = -0.30
+
     # -----------------------------------------------------------------------
     # Convenience properties for PROJECT.md / schema.py contract compatibility
     # -----------------------------------------------------------------------
@@ -161,6 +168,7 @@ class EnvState:
 
     # Temporal & Episode Tracking
     time: int
+    last_action: int = 0
 
     # Remastered Gimmick States (April 2024 Remake)
     security_gauge: float = 0.0
@@ -486,13 +494,18 @@ def _compute_reward(
     debris_y: chex.Array,
     debris_radius: chex.Array,
     debris_active: chex.Array,
+    action: Union[int, chex.Array],
+    last_action: Union[int, chex.Array],
+    on_ground_next: chex.Array,
+    state_player_x: chex.Array,
     params: EnvParams,
 ) -> chex.Array:
-    """Computes shaped reward for Remastered gimmick-oriented play (v4: Debris-Aware Clean Bait & Dodge).
+    """Computes shaped reward for Remastered gimmick-oriented play (v5: Threat-Gated Evasion & Micro-Movement).
 
-    Reward philosophy (v4): Enforce clean Friendly Fire redirection and proportional
-    threat-sensitive damage evasion (Rule 17). Penalizes damage proportional to severity
-    (-1.5 * dmg) and introduces smooth overhead repulsion potentials against large debris.
+    Reward philosophy (v5): Eliminates jump-spam local minima via Action Cost (-0.05 on actions 4,5,6),
+    Switching Jitter Regularization (-0.02 on action changes), Overhead Hazard-Gated Anti-Jump Penalty
+    (-0.35 if airborne under threat), Grounded Tap-Dodge Clearance Bonus (+0.25 when expanding horizontal
+    separation), and Scaled Continuous Overhead Gaussian Repulsion Potential (-0.30).
     """
     is_remastered_or_hybrid = params.mode != MODE_CLASSIC
 
@@ -501,6 +514,11 @@ def _compute_reward(
     r_hit = jnp.where(took_hit, -1.5 * total_dmg, 0.0)
     r_death = jnp.where(hp_next <= 0.0, -70.0, 0.0)
     r_hp = 0.02 * (hp_next / params.player_max_hp)
+
+    # --- R1: Action Cost & Energy Regularization Engine ---
+    is_jump_action = (action == 4) | (action == 5) | (action == 6)
+    r_action_jump = jnp.where(is_jump_action, params.r_action_jump_cost, 0.0)
+    r_jitter = jnp.where(action != last_action, params.r_jitter_cost, 0.0)
 
     # --- Clean Friendly Fire Redirection (Bait & Dodge) ---
     clean_boss_hit = laser_hits_boss & (~laser_hits_player)
@@ -543,23 +561,41 @@ def _compute_reward(
         0.0,
     )
 
-    # --- Overhead High-Threat Debris Repulsion Potential (Rule 17) ---
-    dx_deb = jnp.abs(px_next - debris_x)
+    # --- R2: Tap-Dodging Hazard Corridor & Overhead Repulsion ---
+    dx_deb_next = jnp.abs(px_next - debris_x)
+    dx_deb_prev = jnp.abs(state_player_x - debris_x)
     dy_deb = py_next - debris_y
     is_overhead = (
         debris_active
         & (debris_radius >= 24.0)
-        & (dy_deb > 0.0)
-        & (dy_deb < 180.0)
+        & (dy_deb >= 0.0)
+        & (dy_deb <= 180.0)
     )
+    is_threat_overhead = is_overhead & (dx_deb_next < 45.0)
+    has_overhead_threat = jnp.any(is_threat_overhead)
+
+    # Anti-jump penalty in overhead danger corridor
+    is_airborne = jnp.logical_not(on_ground_next)
+    r_airborne_hazard = jnp.where(
+        has_overhead_threat & is_airborne,
+        params.r_airborne_hazard_cost,
+        0.0,
+    )
+
+    # Grounded clearance bonus: moving horizontally away from debris center
+    moving_away = is_threat_overhead & (dx_deb_next > dx_deb_prev)
+    can_tap_dodge = on_ground_next & jnp.any(moving_away)
+    r_tap_dodge = jnp.where(can_tap_dodge, params.r_tap_dodge_bonus, 0.0)
+
+    # Continuous overhead Gaussian repulsion potential (scaled to params.debris_repel_scale = -0.30)
     overhead_weight = jnp.where(
         is_overhead,
-        (debris_radius / 36.0) * jnp.exp(-0.5 * (dx_deb / 45.0) ** 2),
+        (debris_radius / 36.0) * jnp.exp(-0.5 * (dx_deb_next / 45.0) ** 2),
         0.0,
     )
     r_debris_repel = jnp.where(
         is_remastered_or_hybrid,
-        -0.05 * jnp.sum(overhead_weight),
+        params.debris_repel_scale * jnp.sum(overhead_weight),
         0.0,
     )
 
@@ -586,6 +622,8 @@ def _compute_reward(
 
     return (
         r_base + r_hit + r_death + r_hp
+        + r_action_jump + r_jitter
+        + r_airborne_hazard + r_tap_dodge
         + r_boss_hit + r_shield + r_self_laser
         + r_overload + r_gauge + r_safe_zone
         + r_wall + r_bait + r_dodge + r_debris_repel
@@ -673,6 +711,7 @@ class LotusPhase1Env(environment.Environment):
             debris_active=deb_act_next,
             debris_type=cur_deb_t,
             time=time_next,
+            last_action=action,
             security_gauge=rm["gauge_final"],
             is_overload=rm["is_overload_next"],
             overload_timer=rm["overload_timer_next"],
@@ -686,7 +725,7 @@ class LotusPhase1Env(environment.Environment):
             electric_floor_active=rm["electric_floor_active_next"],
         )
 
-        # 8. Aligned Shaped Reward (v4: Debris-Aware Clean Bait & Dodge)
+        # 8. Aligned Shaped Reward (v5: Threat-Gated Evasion & Micro-Movement)
         gated_boss_hit = rm["laser_hits_boss"] & rm["just_entered_firing"]
         reward = _compute_reward(
             took_hit,
@@ -706,6 +745,10 @@ class LotusPhase1Env(environment.Environment):
             deb_y_next,
             cur_deb_r,
             deb_act_next,
+            action,
+            state.last_action,
+            on_ground_next,
+            state.player_x,
             params,
         )
 
@@ -752,6 +795,7 @@ class LotusPhase1Env(environment.Environment):
             debris_active=jnp.zeros(MAX_DEBRIS, dtype=bool),
             debris_type=jnp.zeros(MAX_DEBRIS, dtype=jnp.int32),
             time=0,
+            last_action=0,
             security_gauge=0.0,
             is_overload=False,
             overload_timer=0.0,

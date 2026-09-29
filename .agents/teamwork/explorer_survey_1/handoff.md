@@ -1,80 +1,108 @@
-# Handoff Report: WZ Specification & EnvParams Extraction for Lotus Phase 1
+# Handoff Report: R1 & R2 Investigation & Specification
+## Autonomous Micro-Movement & Threat-Gated Evasion in Maple Gymnax Lotus Phase 1
 
-**Agent ID**: `explorer_survey_1` (teamwork_preview_spec_miner)  
-**Parent Agent**: `d30c9047-58e0-49d2-8a5c-3a4baedf9ed6`  
-**Date**: 2026-09-26T15:40:00Z  
-**Target Specification Report**: `c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_1\wz_spec_report.md`
+- **Sender**: `explorer_survey_1` (Explorer Subagent)
+- **Recipient**: `orchestrator_3` (ID: `e8d54a3b-63f5-4fbd-92da-90a91af57a97`)
+- **Date**: 2026-09-29T11:37:00Z
+- **Working Directory**: `c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_1`
+- **Full Survey Report**: `c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_1\survey_r1_r2.md`
 
 ---
 
 ## 1. Observation
 
-1. **`C:\mp` Files & Directories**:
-   - `C:\mp\wz_json_restorer.py` (2,433 bytes) defines `restore_node(node)` which parses `type`, `name`, `value`, `children`, `width`, `height`, and `target`.
-   - `C:\mp\run_batch_restore.py` and `run_batch_restore_v2.py` define batch restoration from `SOURCE_DIR = r"D:\Maple_Decrypted_Client"` to `DEST_DIR = r"C:\mp\Restored_Data"`.
-   - `C:\mp\Restored_Data\Mob\BossPattern\_Canvas\_Canvas_012\BossSuu.img.json` exists with size 31,452 bytes, top-level key `BossSuu.img`, and sub-keys: `['common', '1000', '1001', '1002', '1003', '1004', '1005', '1006', '1007', '1008', '1009']`.
-   - `C:\mp\Restored_Data\Map\Back\Back_000\bossSuu.img.json` exists with size 43,343 bytes, subkeys `['back', 'ani', 'spine']`, containing `spine/0/Swoo_Bossmap_Phase1.atlas` with 899 lines and 124 texture atlas sprite regions.
-   - `C:\mp\Maple_Decrypted_Client` has empty directories (`Map\Obj\Obj_000\BossSuu.img`, `Mob\_Canvas\_Canvas_074\8930000.img`).
-2. **Extraction Log Evidence (`D:\Maple_Decrypted_Client\full_extraction.log`)**:
-   - Line 76-80 verbatim:  
-     `2026-09-01 06:57:35,849 [ERROR] [PID 21496] FAIL Packs\Mob_00000.ms: 'MsContainer' object has no attribute 'canvas_refs'`  
-     `2026-09-01 06:57:40,488 [ERROR] [PID 21008] FAIL Packs\Mob_00000.ms: 'MsContainer' object has no attribute 'canvas_refs'`
-   - Mob canvas archives were extracted (`Mob\_Canvas\_Canvas_074.wz: 27 imgs, 1124 PNGs`), but property pack files (`.ms`) failed extraction.
-3. **Pattern Inspection in `BossSuu.img.json`**:
-   - `Pattern common`: Contains `UI/default/gauge/0` (8x102 px), `UI/destruction/overloadActivated` (11 frames), `UI/overload/gauge/0` (8x102 px).
-   - `Pattern 1001`: Sub-actions `000` (tracking laser: 16 ball frames, 12 end frames with dimensions up to 448x2048 px) and `001` (small arm slam: 12 ball frames).
-   - `Pattern 1006`: Sub-action `000/1/loop` (screen-wide horizontal bombardment: 2464x424 px) and `002/1/loop` (electric field: 456x328 px).
-4. **Authoritative Domain Update (`ORIGINAL_REQUEST.md` lines 54-78)**:
-   - Lotus Remaster (April 2024) specifies:
-     - Security & Annihilation Gauge: natural increase 0.6%/s (Normal), 0.8%/s (Hard), 2.0%/s (Extreme); 100% -> 25s Overload mode.
-     - Overload: horizontal bombardment (1006-000, 100% HP damage every 0.5s, right-side safe zone) + electric field (1006-002, 5% damage every 0.36s for 4s, 5 ticks -> forced jump + stun).
-     - Friendly Fire: Tracking laser (1001-000) hitting player +10% gauge & 15% HP; hitting Lotus -10% gauge & breaks shield. Small arm slam (1001-001) hitting player +3% gauge & 5% HP; hitting Lotus -3% gauge.
-     - Floor electric discharge: jump avoidance ($y < 550.0$).
-     - Shield generation: broken by tracking laser.
+1. **Current Action Space Mismatch (`src/maple_gymnax/envs/common.py:30-36`)**:
+   ```python
+   ACTION_NOOP: int = 0
+   ACTION_LEFT: int = 1
+   ACTION_RIGHT: int = 2
+   ACTION_JUMP: int = 3
+   ACTION_JUMP_LEFT: int = 4
+   ACTION_JUMP_RIGHT: int = 5
+   ACTION_DUCK: int = 6
+   ```
+   Whereas the authoritative user request specifies:
+   `0 NOOP, 1 LEFT, 2 RIGHT, 3 DOWN, 4 JUMP, 5 JUMP_LEFT, 6 JUMP_RIGHT`.
+   In the existing code, jump actions are $\{3, 4, 5\}$ and duck is $6$. In the target specification, ground actions $\{0, 1, 2, 3\}$ and jump actions $\{4, 5, 6\}$ are contiguous blocks.
+   Downstream impact: `tests/e2e/test_tier1_features.py` lines 379 and 1468 used integer literal `3` expecting jump, and line 781 used integer literal `6` expecting duck. `tests/test_lotus_phase1.py` uses symbolic imports (`ACTION_JUMP`, `ACTION_DUCK`) and has zero regressions when constants change.
+
+2. **`EnvState` Missing `last_action` (`src/maple_gymnax/envs/lotus_phase1.py:138-177`)**:
+   `EnvState` currently contains kinematic, classic laser, debris, time, and remastered fields, but does NOT contain `last_action`.
+   In Python dataclasses with Flax, non-default fields precede default fields. Adding `last_action: int = 0` among default fields (e.g. line 164) preserves 100% backward compatibility with existing keyword instantiations.
+
+3. **Missing Arguments in `_compute_reward` (`src/maple_gymnax/envs/lotus_phase1.py:471-490`)**:
+   `_compute_reward` currently accepts 17 arguments. It does NOT receive `action`, `last_action`, `on_ground_next`, or `state.player_x`. Consequently, action effort penalties, switching jitter, airborne hazard gating, and directional tap-dodging cannot currently be evaluated.
+
+4. **Debris Tracking & Current Overhead Repulsion (`src/maple_gymnax/envs/lotus_phase1.py:547-564`)**:
+   Debris is tracked via static padded arrays of capacity `MAX_DEBRIS = 30` with radii $16.0$ (small), $24.0$ (medium), and $36.0$ (large).
+   Current continuous overhead repulsion is implemented as:
+   ```python
+   dx_deb = jnp.abs(px_next - debris_x)
+   dy_deb = py_next - debris_y
+   is_overhead = (debris_active & (debris_radius >= 24.0) & (dy_deb > 0.0) & (dy_deb < 180.0))
+   overhead_weight = jnp.where(is_overhead, (debris_radius / 36.0) * jnp.exp(-0.5 * (dx_deb / 45.0) ** 2), 0.0)
+   r_debris_repel = jnp.where(is_remastered_or_hybrid, -0.05 * jnp.sum(overhead_weight), 0.0)
+   ```
+   The coefficient is currently `-0.05`. R2 specifies scaling this to `-0.30`.
+
+5. **Baseline Test Execution**:
+   Running `uv run pytest tests/test_lotus_phase1.py` via `run_command` (task-86) completed with exit code 0:
+   `============================= 33 passed in 27.97s =============================`.
 
 ---
 
 ## 2. Logic Chain
 
-1. **Step 1 (Source identification)**: Observation 1 confirms that `C:\mp\Restored_Data\Mob\BossPattern\_Canvas\_Canvas_012\BossSuu.img.json` and `C:\mp\Restored_Data\Map\Back\Back_000\bossSuu.img.json` are the primary restored WZ assets for Lotus Phase 1.
-2. **Step 2 (Remaster pattern correlation)**: Observation 3 reveals pattern keys `1001` (subkeys `000`, `001`), `1006` (subkeys `000`, `002`), and `common/UI` (gauge, overload, destruction). Comparing this directly with Observation 4 confirms that `BossSuu.img.json` represents the April 2024 Remastered Lotus Phase 1.
-3. **Step 3 (Quirks & missing properties)**: Observation 2 proves why leaf frames inside `BossSuu.img.json` are empty `{}` dictionaries: KMS `.ms` property extraction failed, leaving only the canvas container tree.
-4. **Step 4 (Parser synthesis requirement)**: Because property `.ms` extraction failed, `wz_parser.py` cannot rely solely on leaf numeric values from WZ for physics constants. Instead, `wz_parser.py` must parse the available WZ structure (patterns, frame counts, canvas sizes, UI gauge, atlas regions) and combine them with authoritative MapleStory Lotus physical constants (1366x768 bounds, 683.0x384.0 core center, 605.0 floor y, 0.5235 rad/s laser rotation, debris tables, gauge rates).
-5. **Step 5 (EnvParams schema design)**: The unified `EnvParams` schema must support both Classic Mode (rotating cross laser + falling debris) and Remastered Mode (gauge + overload bombardment + friendly fire guidance + floor discharge + shield) with full JAX/Flax dataclass compatibility.
+1. **Root Cause of 680-step / 11-second Plateau**:
+   Zero-cost jump actions in high-velocity platformers lead to parabolic bunny-hopping because ballistic elevation trivially avoids ground hazards. However, parabolic arcs remove steering authority and place the player directly into descending debris corridors, causing 7.7 hits/ep.
+2. **From Observation 1 to Action Partitioning**:
+   Remapping the action space in `common.py` such that $\{0, 1, 2, 3\}$ are ground actions and $\{4, 5, 6\}$ are jump actions allows clean, branch-free JAX vectorization:
+   `is_jump = action >= 4` and `r_action_jump = jnp.where(is_jump, -0.05, 0.0)`.
+3. **From Observation 2 to State Tracking**:
+   Adding `last_action: int = 0` to `EnvState` and recording `last_action=action` in `step_env` allows computing the Markovian action transition:
+   `r_jitter = jnp.where(action != state.last_action, -0.02, 0.0)`.
+   This penalizes 1-frame chatter and encourages 5–10 frame micro-taps.
+4. **From Observation 3 & 4 to Threat Corridor Control (R2)**:
+   Under high-threat debris ($r \ge 24\text{px}$, $|\Delta x| < 45\text{px}$, $\Delta y \in [0, 180\text{px}]$):
+   - Jumping is penalized with $r_{\text{airborne\_hazard}} = -0.35$ if `jnp.logical_not(on_ground_next)`.
+   - Grounded lateral motion away from debris center ($dx_{\text{next}} > dx_{\text{prev}}$) is rewarded with $r_{\text{tap\_dodge}} = +0.25$.
+   - The net reward delta between jumping and grounded micro-movement under threat is:
+     $$\Delta r = (+0.25) - (-0.05 - 0.35) = +0.65 \text{ per tick}$$
+   - Scaling $\phi_{\text{debris}}$ from $-0.05$ to $-0.30$ provides a smooth continuous gradient driving the policy away before entering the discrete danger corridor.
 
 ---
 
 ## 3. Caveats
 
-1. **Client Property Separation**: `C:\mp\Restored_Data` contains only canvas/atlas structures. True numerical damage tables in classic MapleStory are hardcoded in the server/client executable (`MapleStory.exe`) or `.ms` scripts rather than plain XML properties. The damage percentages and timings in our report are grounded in the authoritative Remaster patch notes and domain knowledge.
-2. **Audio Data**: Sound effects (`Sound/Mob.wz`) were not extracted (0 sounds in log). Simulation does not require audio.
-3. **Map File 350060...**: Lotus boss room map WZ (`350060160.img`) was not restored to `C:\mp\Restored_Data\Map\Map` (which only contains `Map0`). However, `bossSuu.img.json` in `Map\Back` contains the complete `Swoo_Bossmap_Phase1.atlas` confirming the visual dimensions and bounds.
+1. **Downstream Hardcoded Integers in E2E Tests**:
+   `tests/e2e/test_tier1_features.py` contains 2 instances where action 3 was hardcoded as jump (lines 379, 1468) and 1 instance where action 6 was hardcoded as duck (line 781). The implementer must update these tests to use `ACTION_JUMP` and `ACTION_DOWN` (or `4` and `3`).
+2. **Backward Compatibility Alias**:
+   Existing code and imports expect `ACTION_DUCK`. We must maintain `ACTION_DUCK = ACTION_DOWN = 3` so existing code does not raise `ImportError` or `AttributeError`.
 
 ---
 
 ## 4. Conclusion
 
-1. **Authoritative Specification Established**: All mechanics, coordinate bounds (1366x768), core center (683.0, 384.0), floor platform (605.0), laser rotation ($\omega = 0.5235\text{ rad/s}$), debris parameters (max 30, 4 types), and remastered gauge/friendly-fire mechanics are fully discovered, verified, and documented.
-2. **Exact JSON Schema Defined**: A complete JSON Schema (Draft 2020-12) has been specified for `EnvParams` in `wz_spec_report.md`.
-3. **Parser Implementation Strategy**: `wz_parser.py` can safely parse `C:\mp\Restored_Data\Mob\BossPattern\_Canvas\_Canvas_012\BossSuu.img.json` and `C:\mp\Restored_Data\Map\Back\Back_000\bossSuu.img.json`, extracting the pattern tokens and synthesizing them into the `EnvParams` Flax dataclass without runtime errors.
+The technical path to fulfill R1 and R2 is fully established, mathematically verified, and documented with exact code diffs in `survey_r1_r2.md`:
+1. Update `src/maple_gymnax/envs/common.py` to establish the $\{0: \text{NOOP}, 1: \text{LEFT}, 2: \text{RIGHT}, 3: \text{DOWN/DUCK}, 4: \text{JUMP}, 5: \text{JUMP\_LEFT}, 6: \text{JUMP\_RIGHT}\}$ action space.
+2. Extend `EnvParams` with default reward hyperparameters and `EnvState` with `last_action: int = 0`.
+3. Update `_compute_reward()` in `src/maple_gymnax/envs/lotus_phase1.py` with pure JAX, branch-free formulations of `r_action_jump`, `r_jitter`, `r_airborne_hazard`, `r_tap_dodge`, and the scaled `r_debris_repel` ($-0.30$).
+4. Wire `last_action=action` into `step_env` and `last_action=0` into `reset_env`.
 
 ---
 
 ## 5. Verification Method
 
-To independently verify these findings, run the following commands:
-
-1. **Verify BossSuu Pattern & UI Structure**:
-   ```bash
-   python -c "import json; d = json.load(open(r'C:\mp\Restored_Data\Mob\BossPattern\_Canvas\_Canvas_012\BossSuu.img.json', 'r', encoding='utf-8'))['BossSuu.img']; print('Patterns:', [k for k in d if k != 'common']); print('UI:', list(d['common']['UI'].keys()))"
-   ```
-   *Expected Output*: `Patterns: ['1000', '1001', '1002', '1003', '1004', '1005', '1006', '1007', '1008', '1009']`, `UI: ['default', 'destruction', 'overload']`
-
-2. **Verify Map Back Spine Atlas**:
-   ```bash
-   python -c "import json; d = json.load(open(r'C:\mp\Restored_Data\Map\Back\Back_000\bossSuu.img.json', 'r', encoding='utf-8'))['bossSuu.img']; print('Atlas regions:', len(d['spine']['0']['Swoo_Bossmap_Phase1.atlas'].split('\n')))"
-   ```
-   *Expected Output*: `Atlas regions: 899`
-
-3. **Inspect Specification Report**:
-   Inspect `c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_1\wz_spec_report.md` for full physical tables, edge case matrices, and JSON schemas.
+To independently verify the implementation:
+1. **Core Unit & JIT Tests**:
+   `uv run pytest tests/test_lotus_phase1.py`
+   Must pass all 33 tests with zero JIT compilation failures.
+2. **Analytical Reward Assertions**:
+   Add test methods to `tests/test_lotus_phase1.py` asserting exact analytical reward differences:
+   - Action cost: `assert abs((r_ground - r_jump) - 0.05) < 1e-4`
+   - Jitter penalty: `assert abs((r_same - r_switch) - 0.02) < 1e-4`
+   - Airborne hazard penalty: `assert abs((r_grounded - r_airborne) - 0.35) < 1e-4`
+   - Tap-dodge clearance bonus: `assert abs((r_dodge - r_stationary) - 0.25) < 1e-4`
+3. **E2E Feature Suite**:
+   `uv run pytest tests/e2e/test_tier1_features.py`
+   Confirm all kinematic and action space assertions pass.

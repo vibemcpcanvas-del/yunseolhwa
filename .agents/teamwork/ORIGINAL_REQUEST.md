@@ -75,3 +75,64 @@ Integrity mode: development
    - 스우 본체에 보호막 생성 -> 시간 내 미파괴 시 체력 회복 -> 추적 레이저를 스우에게 맞추면 파괴.
 
 이 리메이크 사양을 `maple_gymnax.envs.lotus_phase1`의 상태 공간(`EnvState`), 매개변수(`EnvParams`), 상태전이(`step_env`), 보상 함수(게이지 관리 유도 보상, 레이저 유도 보상)에 최우선으로 반영하고, 구버전 십자 레이저 기믹과 리마스터 게이지/공멸 기믹을 유연하게 스위칭 또는 결합할 수 있도록 모듈화해 주십시오.
+
+## 2026-09-29T11:28:08Z
+
+Requested team: Full team [RL systems, Control Theory & Reward Engineering]
+
+Autonomous Micro-Movement & Threat-Gated Evasion: Eliminating jump-spam local minima via Action Cost, Jitter Regularization, and Tap-Dodging Corridor Rewards in Maple Gymnax Lotus Phase 1.
+
+Working directory: c:/Users/ROCmAdmin/Documents/antigravity/bold-faraday
+Branch: feat/debris-threat-obs
+Integrity mode: development
+
+---
+
+## Background & Deep Research Synthesis
+
+Current PPO policy is trapped in a 680-step / 11-second plateau with 53.7% `JUMP_RIGHT` spam. In zero-cost action spaces, RL agents exploit high-energy actions (the canonical "bunny-hop" artifact). Grounded micro-movement (칼무빙 / tap-dodging) requires:
+1. **Action Effort Penalty**: Airborne actions (`JUMP`, `JUMP_L`, `JUMP_R`) incur continuous energy costs (`-0.05`), while ground walking is zero-cost.
+2. **Action Switching Regularization**: High-frequency directional chatter is penalized (`-0.02`), fostering deliberate 5-10 frame micro-taps.
+3. **Hazard-Gated Jump Penalty**: Jumping while debris is within the overhead danger cone ($|\Delta x| < 45\text{px}$, $\Delta y \in [0, 180\text{px}]$) incurs an amplified penalty (`-0.35`).
+4. **Tap-Dodging Clearance Incentive**: Grounded movement that expands lateral separation from falling debris ($|\Delta x| > r + 15\text{px}$) receives positive evasion shaping (`+0.25`).
+5. **Clean Slate Initialization**: Initialized from scratch to prevent sticky local-optima inertia from legacy jump-heavy policies.
+
+---
+
+## Requirements
+
+### R1. Action Cost & Energy Regularization Engine
+- In `_compute_reward()` of `src/maple_gymnax/envs/lotus_phase1.py`:
+  - Assign explicit action cost `r_action_jump = -0.05` to discrete actions `4 (JUMP)`, `5 (JUMP_LEFT)`, and `6 (JUMP_RIGHT)`.
+  - Maintain zero cost `r_action_ground = 0.0` for actions `0 (NOOP)`, `1 (LEFT)`, `2 (RIGHT)`, `3 (DOWN)`.
+  - Add previous action tracking to `EnvState` (`last_action: int = 0`) to compute jitter penalty `r_jitter = -0.02 * (action != state.last_action)`.
+
+### R2. Tap-Dodging Hazard Corridor & Overhead Repulsion
+- If high-threat debris ($r \ge 24$) is overhead ($|\Delta x| < 45\text{px}$, $\Delta y \in [0, 180\text{px}]$):
+  - Impose anti-jump penalty `r_airborne_hazard = -0.35` if `~player_on_ground`.
+  - Award grounded clearance bonus `r_tap_dodge = 0.25` when moving horizontally away from debris center.
+  - Scale continuous overhead Gaussian potential $\phi_{\text{debris}}$ from `-0.05` to `-0.30`.
+
+### R3. Transparent Real-Time Console Telemetry & Metric Overhaul
+- In `train_ppo.py`:
+  - Replace the 60-second binary `Survival: 0.0%` with real-time `Survival(s)` (average survival seconds = length / 60.0).
+  - Print live `DebrisHits/ep` and `JumpRatio%` directly in the training log every 20 updates.
+
+### R4. Colab T4 Cloud Burst Training from Scratch
+- Launch clean-slate training on Colab T4 GPU pool (`account_1`):
+  - 16,384 parallel environments, 35,000 updates, SPS ~980,000.
+  - Intermediate checkpoints synced every 1,200 updates.
+
+---
+
+## Acceptance Criteria
+
+### Gate 1: Behavioral Distribution Shift
+- [ ] In greedy evaluation of early checkpoints (`step_4800`+), `JUMP_RIGHT` ratio drops from 53.7% to under 20%.
+- [ ] Grounded action ratio (`LEFT`, `RIGHT`, `NOOP`) exceeds 50% across rollout steps.
+
+### Gate 2: Debris Evasion & Survival Breakthrough
+- [ ] Debris hit count drops from 7.7 hits/ep to $\le 3.5$ hits/ep.
+- [ ] Average episode survival steps exceed 1,200 steps (20.0s), shattering the 680-step plateau.
+- [ ] Laser baiting and boss shield destruction remain high ($\ge 140 / 200$ shield damage).
+

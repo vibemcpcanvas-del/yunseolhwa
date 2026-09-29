@@ -28,3 +28,31 @@ Modular env design must support both classic (rotating cross laser + falling deb
 Please re-read ORIGINAL_REQUEST.md lines 54-78.
 **Action**: Incorporate these remastered mechanics, state/param representations, and reward functions into gymnax_env_spec.md.
 
+## 2026-09-29T11:30:19Z
+
+You are explorer_survey_2, an Explorer subagent in a Teamwork hierarchy.
+Your working directory is: c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_2
+Your parent is orchestrator_3 (conv ID: e8d54a3b-63f5-4fbd-92da-90a91af57a97).
+
+MANDATORY FIRST STEP:
+Read the authoritative user request at:
+c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\ORIGINAL_REQUEST.md
+Pay special attention to the section dated 2026-09-29T11:28:08Z.
+
+TASK OBJECTIVE:
+Investigate requirements R3 and the test infrastructure:
+1. Examine `train_ppo.py` in detail:
+   - Locate where episode metrics and console logs are currently formatted and printed.
+   - Inspect the current 60-second binary survival metric (`Survival: 0.0%`) and see how to replace it with real-time `Survival(s)` (average survival seconds = length / 60.0).
+   - Locate where and how `DebrisHits/ep` and `JumpRatio%` can be tracked during rollout/training steps and logged every 20 updates.
+   - Check how episode info / transition info buffers record metrics in PureJaxRL / PPO runner.
+2. Examine the existing test suite:
+   - Check `tests/test_lotus_phase1.py` and other test files in `tests/`.
+   - Determine how pytest is executed (`uv run pytest` or `pytest`), what tests currently pass, and what new unit tests are needed for R1, R2, and R3.
+3. Identify potential pitfalls in metric accumulation in vectorized JAX scan environments (e.g. episodic metric reset handling).
+
+OUTPUT REQUIREMENTS:
+- Write detailed survey report to:
+  `c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_2\survey_r3_tests.md`
+- Write your completion handoff to `c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_2\handoff.md`.
+- Send a completion message to orchestrator_3 via `send_message`. Do NOT modify source code files yourself (you are read-only).

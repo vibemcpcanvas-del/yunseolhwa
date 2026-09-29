@@ -38,6 +38,11 @@ if not hasattr(jax.core, "get_opaque_trace_state"):
     except Exception:
         pass
 
+from maple_gymnax.envs.common import (
+    ACTION_JUMP,
+    ACTION_JUMP_LEFT,
+    ACTION_JUMP_RIGHT,
+)
 from maple_gymnax.envs.lotus_phase1 import LotusPhase1Env, EnvParams
 from maple_gymnax.wrappers.log_wrapper import LogWrapper, LogEnvState
 from maple_gymnax.wrappers.flatten_obs import FlattenObservationWrapper
@@ -72,7 +77,7 @@ class PPOConfig:
     anneal_lr: bool = True
 
     # Logging and Checkpointing
-    log_interval: int = 1
+    log_interval: int = 20
     checkpoint_interval: int = 50
     checkpoint_dir: str = "checkpoints"
     dtype: str = "float32"
@@ -209,7 +214,9 @@ def _log_callback(
     update_step: int,
     mean_return: float,
     mean_length: float,
-    survival_rate: float,
+    survival_sec: float,
+    debris_hits_per_ep: float,
+    jump_ratio: float,
     mean_gauge: float,
     actor_loss: float,
     critic_loss: float,
@@ -221,7 +228,9 @@ def _log_callback(
         f"[Update {int(update_step):5d}] "
         f"Return: {float(mean_return):8.2f} | "
         f"Length: {float(mean_length):6.1f} | "
-        f"Survival: {float(survival_rate) * 100.0:5.1f}% | "
+        f"Survival(s): {float(survival_sec):5.1f}s | "
+        f"DebrisHits/ep: {float(debris_hits_per_ep):4.1f} | "
+        f"JumpRatio%: {float(jump_ratio) * 100.0:4.1f}% | "
         f"Gauge: {float(mean_gauge):6.4f} | "
         f"Loss(A/C/Ent): {float(actor_loss):.3f}/{float(critic_loss):.3f}/{float(entropy):.3f} | "
         f"SPS: {float(sps):10,.0f}",
@@ -446,6 +455,18 @@ def make_train_step(
             / jnp.maximum(num_dones, 1.0),
             0.0,
         )
+        survival_sec = mean_length / 60.0
+
+        total_debris_hits = jnp.sum(traj_batch.info["debris_hit"].astype(jnp.float32) * done_mask)
+        debris_hits_per_ep = jnp.where(
+            has_dones,
+            total_debris_hits / jnp.maximum(num_dones, 1.0),
+            (jnp.sum(traj_batch.info["debris_hit"].astype(jnp.float32)) / (config.num_steps * config.num_envs)) * mean_length,
+        )
+
+        is_jump = (traj_batch.action == ACTION_JUMP) | (traj_batch.action == ACTION_JUMP_LEFT) | (traj_batch.action == ACTION_JUMP_RIGHT)
+        jump_ratio = jnp.mean(is_jump.astype(jnp.float32))
+
         mean_gauge = jnp.mean(traj_batch.info.get("security_gauge", jnp.zeros(1)))
         sps = (config.num_envs * config.num_steps) / (env_params.dt * config.num_steps)
 
@@ -458,7 +479,9 @@ def make_train_step(
                 update_idx + 1,
                 mean_return,
                 mean_length,
-                survival_rate,
+                survival_sec,
+                debris_hits_per_ep,
+                jump_ratio,
                 mean_gauge,
                 actor_loss,
                 critic_loss,
@@ -479,6 +502,9 @@ def make_train_step(
             "mean_return": mean_return,
             "mean_length": mean_length,
             "survival_rate": survival_rate,
+            "survival_sec": survival_sec,
+            "debris_hits_per_ep": debris_hits_per_ep,
+            "jump_ratio": jump_ratio,
             "mean_gauge": mean_gauge,
             "actor_loss": actor_loss,
             "critic_loss": critic_loss,
@@ -642,7 +668,7 @@ def parse_args() -> PPOConfig:
     parser.add_argument("--no_anneal_lr", action="store_true", help="Disable linear learning rate decay")
 
     # Logging, Checkpointing, and Evaluation
-    parser.add_argument("--log_interval", type=int, default=1, help="Update interval for console logging")
+    parser.add_argument("--log_interval", type=int, default=20, help="Update interval for console logging")
     parser.add_argument("--checkpoint_interval", type=int, default=50,
                         help="Checkpoint frequency (chunk size for outer python loop)")
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints", help="Orbax save directory")

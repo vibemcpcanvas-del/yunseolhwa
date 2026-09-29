@@ -1,48 +1,48 @@
-# BRIEFING — 2026-09-26T15:37:30Z
+# BRIEFING — 2026-09-29T11:36:30Z
 
 ## Mission
-Investigate Python environment, RL framework wrappers (PureJaxRL, Stoix/Stoa, Flashbax), Persona prompt specification, and SPS benchmark design for Maple Gymnax Lotus Phase 1 (Classic & Remastered).
+Investigate requirement R4 (Colab T4 cloud burst training from scratch on account_1) and acceptance criteria Gate 1 & Gate 2 evaluation harness, synthesizing existing scripts and defining exact workflows.
 
 ## 🔒 My Identity
 - Archetype: explorer
-- Roles: teamwork_preview_explorer
-- Working directory: c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_3\
-- Original parent: d30c9047-58e0-49d2-8a5c-3a4baedf9ed6
-- Milestone: survey_rl_wrappers_and_benchmarks
+- Roles: [investigator, synthesizer]
+- Working directory: c:\Users\ROCmAdmin\Documents\antigravity\bold-faraday\.agents\teamwork\explorer_survey_3
+- Original parent: e8d54a3b-63f5-4fbd-92da-90a91af57a97
+- Milestone: survey_r4_eval
 
 ## 🔒 Key Constraints
-- Read-only investigation — do NOT implement
-- Scope: Workspace python environment, RL Framework Wrappers (PureJaxRL, Stoix/Stoa, Flashbax), Persona System Prompt, SPS Benchmark design
-- Deliverables: rl_wrappers_bench_spec.md, handoff.md, send_message to parent
+- Read-only investigation — do NOT implement / modify source code
+- Files for content delivery, messages for coordination
+- Handoff protocol: 5 components (Observation, Logic Chain, Caveats, Conclusion, Verification Method)
+- Output report path: survey_r4_eval.md and handoff.md in working directory
+- Communicate completion to orchestrator_3 via send_message
 
 ## Current Parent
-- Conversation ID: d30c9047-58e0-49d2-8a5c-3a4baedf9ed6
-- Updated: 2026-09-26T15:36:21Z
+- Conversation ID: e8d54a3b-63f5-4fbd-92da-90a91af57a97
+- Updated: not yet
 
 ## Investigation State
 - **Explored paths**:
-  - `ORIGINAL_REQUEST.md` (Classic R1-R4 & Remastered Lotus April 2024 update lines 54-78)
-  - Windows host environment: Python 3.14.7, uv 0.12.6, Python 3.12 cached at `AppData\Roaming\uv\python`
-  - WSL2 `Ubuntu-24.04-ROCmLab`: Python 3.12.3, ROCm `/dev/kfd` status
-  - Gymnax 0.0.9 architecture (`Environment.step` 6-tuple return, built-in auto-reset)
-  - Flashbax 0.1.3 Pytree replay buffer zero-copy workflow
-  - Empirical Ryzen 5 5600X CPU benchmark: CartPole achieved 2.97M SPS with `jax.lax.scan` at B=4096
+  - `run_colab_train.py`, `cloud/cloud_manager.py`, `cloud/colab_account_manager.py`, `cloud/colab_accounts.json`
+  - `cloud/colab_tunnel_bridge.py`, `cloud/colab_jax_train_job.py`, `cloud/colab.bat`, `cloud/colab_bridge.py`
+  - `train_ppo.py` (checkpoint saving logic, log callback, precision)
+  - `eval_checkpoint.py` (greedy evaluation with RolloutRunner)
+  - Empirical rollouts of legacy checkpoints (`checkpoints/step_4800` and `checkpoints/step_26400`)
 - **Key findings**:
-  - `.venv` needs creation with `uv venv --python 3.12 .venv`.
-  - Dependencies (`jax`, `flax`, `gymnax`, `flashbax`, `pytest`) resolve in 848ms without conflicts.
-  - Unified 109-dim observation vector designed for `FlattenObservationWrapper`, accommodating both Classic (cross laser, debris) and Remastered (gauge, friendly fire, overload mode, shield).
-  - High-speed rollout runner architecture combining `jax.vmap` and `jax.lax.scan` defined.
-  - Full Persona System Prompt module and SPS benchmark suite designed.
-- **Unexplored areas**:
-  - None within Explorer 3 scope.
+  - `account_1` ("구글 메인 계정") is verified READY in `colab_accounts.json`.
+  - Clean-slate launch requires `--no_resume` flag to suppress packaging of old checkpoints.
+  - To sync checkpoints strictly every 1,200 updates, `--checkpoint_interval 1200 --checkpoint_interval_seconds 0.0 --chunk_size 200` must be used.
+  - Empirical baseline measurements proved severe jump-spam local minimum: `step_4800` exhibits 70.1% `JUMP_RIGHT`, 83.0% total jumping, 16.2% grounded actions, 8.7 debris hits/ep, and 658.4 steps survival plateau.
+  - Formulated automated Gate 1 and Gate 2 evaluation harness specification (`eval_gates.py`).
+- **Unexplored areas**: None. Full survey complete across R4, Gate 1, and Gate 2.
 
 ## Key Decisions Made
-- Unified static 109-dimensional observation vector adopted to support both Classic and Remastered mechanics without changing network dimensions.
-- `PureJaxRLAdapterWrapper` specified to convert Gymnax 0.0.9 6-tuple return into 5-tuple for PureJaxRL.
-- `jax.lax.scan` selected as primary rollout engine due to proven ~3M SPS performance on Ryzen 5600X CPU.
+- Recommended exact clean-slate launch command for R4 on Colab T4.
+- Documented recommendation to amend line 837 in `train_ppo.py` during Milestone 3 to unify time and step checkpoint triggers.
+- Produced comprehensive survey report `survey_r4_eval.md` and structured 5-component handoff `handoff.md`.
 
 ## Artifact Index
-- `rl_wrappers_bench_spec.md` — Comprehensive specification for RL wrappers, rollout runner, Stoix, Flashbax, Persona Prompt, and SPS Benchmark.
-- `handoff.md` — 5-component handoff report.
-- `progress.md` — Liveness heartbeat.
-- `DISPATCH.md` — Dispatch message logs.
+- DISPATCH.md — record of received instructions
+- progress.md — liveness heartbeat and milestone checklist
+- survey_r4_eval.md — detailed survey report on R4, empirical baselines, and evaluation harness
+- handoff.md — structured 5-component handoff report
