@@ -555,15 +555,15 @@ class TestEpisodeLifecycle:
         assert jnp.all(obs >= -1.0)
         assert jnp.all(obs <= 1.0)
 
-    def test_extended_observation_shape_142(self):
-        """Verifies extended observation returns 142 dimensions for Remastered RL."""
+    def test_extended_observation_shape_172(self):
+        """Verifies extended observation returns 172 dimensions for Remastered RL (Rule 17)."""
         env = LotusPhase1Env()
         params = env.default_params
         key = jax.random.PRNGKey(123)
         _, state = env.reset_env(key, params)
 
         ext_obs = env.get_extended_obs(state, params)
-        assert ext_obs.shape == (142,)
+        assert ext_obs.shape == (172,)
 
     def test_mode_observation_space_and_step_binding(self):
         """Verifies observation_space, reset_env, and step_env shapes match exactly across all modes."""
@@ -579,23 +579,23 @@ class TestEpisodeLifecycle:
         next_obs_c, _, _, _, _ = env.step_env(key, state_c, 0, p_classic)
         assert next_obs_c.shape == (130,)
 
-        # 2. Remastered Mode (mode=1) -> 142-dim
+        # 2. Remastered Mode (mode=1) -> 172-dim
         p_remaster = env.default_params.replace(mode=1)
         assert p_remaster.is_remastered is True
-        assert env.observation_space(p_remaster).shape == (142,)
+        assert env.observation_space(p_remaster).shape == (172,)
         obs_r, state_r = env.reset_env(key, p_remaster)
-        assert obs_r.shape == (142,)
+        assert obs_r.shape == (172,)
         next_obs_r, _, _, _, _ = env.step_env(key, state_r, 0, p_remaster)
-        assert next_obs_r.shape == (142,)
+        assert next_obs_r.shape == (172,)
 
-        # 3. Hybrid Mode (mode=2) -> 142-dim
+        # 3. Hybrid Mode (mode=2) -> 172-dim
         p_hybrid = env.default_params.replace(mode=2)
         assert p_hybrid.is_remastered is True
-        assert env.observation_space(p_hybrid).shape == (142,)
+        assert env.observation_space(p_hybrid).shape == (172,)
         obs_h, state_h = env.reset_env(key, p_hybrid)
-        assert obs_h.shape == (142,)
+        assert obs_h.shape == (172,)
         next_obs_h, _, _, _, _ = env.step_env(key, state_h, 0, p_hybrid)
-        assert next_obs_h.shape == (142,)
+        assert next_obs_h.shape == (172,)
 
     def test_reward_shaping_gauge_and_safe_zone_alignment(self):
         """Verifies anti-reward-hacking shaping: gauge penalty and safe-zone positioning."""

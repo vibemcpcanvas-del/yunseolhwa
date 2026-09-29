@@ -245,7 +245,7 @@ def make_train_step(
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
 
-    obs_dim = 142 if env_params.is_remastered else 130
+    obs_dim = 172 if env_params.is_remastered else 130
     action_dim = 7
 
     # Learning rate schedule
@@ -572,7 +572,7 @@ def evaluate_policy(
     env_params = EnvParams(mode=config.mode)
     wrapped = FlattenObservationWrapper(env)
 
-    obs_dim = 142 if env_params.is_remastered else 130
+    obs_dim = 172 if env_params.is_remastered else 130
     network = ActorCritic(action_dim=7)
 
     def policy_fn(obs: chex.Array, state: Any, key: chex.PRNGKey) -> chex.Array:

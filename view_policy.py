@@ -468,7 +468,7 @@ def load_trained_policy(checkpoint_path: str, mode: int) -> Tuple[Any, Any]:
 
     # Initialize dummy target PyTree template to prevent cross-device topology mismatch
     # (e.g. restoring GPU-trained checkpoint on CPU)
-    obs_dim = 142 if mode in (MODE_REMASTERED, MODE_HYBRID) else 130
+    obs_dim = 172 if mode in (MODE_REMASTERED, MODE_HYBRID) else 130
     dummy_obs = jnp.zeros((1, obs_dim), dtype=jnp.float32)
     dummy_params = network.init(jax.random.PRNGKey(0), dummy_obs)
 

@@ -470,6 +470,7 @@ def _compute_damage_and_health(
 
 def _compute_reward(
     took_hit: chex.Array,
+    total_dmg: chex.Array,
     laser_hits_boss: chex.Array,
     laser_hits_player: chex.Array,
     shield_shatter: chex.Array,
@@ -477,23 +478,27 @@ def _compute_reward(
     gauge_final: chex.Array,
     is_overload_next: chex.Array,
     px_next: chex.Array,
+    py_next: chex.Array,
     hp_next: chex.Array,
     tl_state: chex.Array,
     tl_lock_x: chex.Array,
+    debris_x: chex.Array,
+    debris_y: chex.Array,
+    debris_radius: chex.Array,
+    debris_active: chex.Array,
     params: EnvParams,
 ) -> chex.Array:
-    """Computes shaped reward for Remastered gimmick-oriented play (v3: Clean Bait & Dodge).
+    """Computes shaped reward for Remastered gimmick-oriented play (v4: Debris-Aware Clean Bait & Dodge).
 
-    Reward philosophy (v3): Enforce clean Friendly Fire redirection where suicidal
-    self-damage ('dirty baiting') yields negative return, while baiting and cleanly
-    stepping out of the locked beam yields high positive return. Provides smooth,
-    continuous spatial potentials for policy distillation compatibility.
+    Reward philosophy (v4): Enforce clean Friendly Fire redirection and proportional
+    threat-sensitive damage evasion (Rule 17). Penalizes damage proportional to severity
+    (-1.5 * dmg) and introduces smooth overhead repulsion potentials against large debris.
     """
     is_remastered_or_hybrid = params.mode != MODE_CLASSIC
 
-    # --- Core Survival ---
+    # --- Core Survival (Damage-Proportional Penalty - Rule 17) ---
     r_base = 0.03
-    r_hit = jnp.where(took_hit, -30.0, 0.0)
+    r_hit = jnp.where(took_hit, -1.5 * total_dmg, 0.0)
     r_death = jnp.where(hp_next <= 0.0, -70.0, 0.0)
     r_hp = 0.02 * (hp_next / params.player_max_hp)
 
@@ -538,6 +543,26 @@ def _compute_reward(
         0.0,
     )
 
+    # --- Overhead High-Threat Debris Repulsion Potential (Rule 17) ---
+    dx_deb = jnp.abs(px_next - debris_x)
+    dy_deb = py_next - debris_y
+    is_overhead = (
+        debris_active
+        & (debris_radius >= 24.0)
+        & (dy_deb > 0.0)
+        & (dy_deb < 180.0)
+    )
+    overhead_weight = jnp.where(
+        is_overhead,
+        (debris_radius / 36.0) * jnp.exp(-0.5 * (dx_deb / 45.0) ** 2),
+        0.0,
+    )
+    r_debris_repel = jnp.where(
+        is_remastered_or_hybrid,
+        -0.05 * jnp.sum(overhead_weight),
+        0.0,
+    )
+
     # --- Potential-Based Tracking & Evasion Shaping (Distillation-Ready) ---
     # Phase 1: During TRACKING (1), Gaussian potential toward boss center core_x (683px)
     is_tracking = tl_state == 1
@@ -563,8 +588,9 @@ def _compute_reward(
         r_base + r_hit + r_death + r_hp
         + r_boss_hit + r_shield + r_self_laser
         + r_overload + r_gauge + r_safe_zone
-        + r_wall + r_bait + r_dodge
+        + r_wall + r_bait + r_dodge + r_debris_repel
     )
+
 
 
 # ---------------------------------------------------------------------------
@@ -660,10 +686,11 @@ class LotusPhase1Env(environment.Environment):
             electric_floor_active=rm["electric_floor_active_next"],
         )
 
-        # 8. Aligned Shaped Reward (v3: Clean Bait & Dodge + Distillation Shaping)
+        # 8. Aligned Shaped Reward (v4: Debris-Aware Clean Bait & Dodge)
         gated_boss_hit = rm["laser_hits_boss"] & rm["just_entered_firing"]
         reward = _compute_reward(
             took_hit,
+            total_dmg,
             gated_boss_hit,
             rm["laser_hits_player"],
             rm["shield_shatter"],
@@ -671,9 +698,14 @@ class LotusPhase1Env(environment.Environment):
             rm["gauge_final"],
             rm["is_overload_next"],
             px_next,
+            py_next,
             hp_next,
             rm["tl_state_next"],
             rm["tl_lock_x_next"],
+            cur_deb_x,
+            deb_y_next,
+            cur_deb_r,
+            deb_act_next,
             params,
         )
 
@@ -763,9 +795,13 @@ class LotusPhase1Env(environment.Environment):
         return jnp.concatenate([p_norm, laser_norm, deb_norm])
 
     def get_extended_obs(self, state: Any, params: EnvParams) -> chex.Array:
-        """Returns extended 142-dimensional flat normalized float32 observation tensor for Remaster/Hybrid."""
+        """Returns extended 172-dimensional flat normalized float32 observation tensor for Remaster/Hybrid (Rule 17)."""
         state = getattr(state, "env_state", state)
         base_obs = self.get_obs(state, params)
+
+        # 30-dim: Normalized debris collision radius (0.0 if inactive, max 36.0px -> 1.0)
+        deb_radii = (state.debris_radius / 36.0) * state.debris_active.astype(jnp.float32)
+
         remaster_features = jnp.array([
             state.security_gauge,
             jnp.where(state.is_overload, 1.0, 0.0),
@@ -780,11 +816,12 @@ class LotusPhase1Env(environment.Environment):
             jnp.where(state.electric_floor_active, 1.0, 0.0),
             0.0,  # slam_active placeholder
         ], dtype=jnp.float32)
-        return jnp.concatenate([base_obs, remaster_features])
+        return jnp.concatenate([base_obs, deb_radii, remaster_features])
 
     def get_observation(self, state: EnvState, params: EnvParams) -> chex.Array:
-        """Returns observation matching active mode (130-dim for Classic, 142-dim for Remastered/Hybrid)."""
-        return self.get_extended_obs(state, params) if params.is_remastered else self.get_obs(state, params)
+        """Returns observation matching active mode (130-dim for Classic, 172-dim for Remastered/Hybrid)."""
+        is_extended = params.is_remastered or (params.mode == MODE_HYBRID)
+        return self.get_extended_obs(state, params) if is_extended else self.get_obs(state, params)
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> bool:
         return (state.player_hp <= 0.0) | (state.time >= params.max_steps_in_episode)
@@ -793,5 +830,6 @@ class LotusPhase1Env(environment.Environment):
         return spaces.Discrete(7)
 
     def observation_space(self, params: EnvParams) -> spaces.Box:
-        obs_dim = 142 if params.is_remastered else 130
+        obs_dim = 172 if (params.is_remastered or params.mode == MODE_HYBRID) else 130
         return spaces.Box(low=-1.0, high=1.0, shape=(obs_dim,), dtype=jnp.float32)
+

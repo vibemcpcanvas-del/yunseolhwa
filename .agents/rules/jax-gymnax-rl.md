@@ -99,3 +99,11 @@ When implementing or modifying JAX-accelerated simulation environments:
      Never report a gimmick as "successfully solved" if the agent is achieving it through suicidal self-damage (dirty baiting) that prevents episode completion.
    - **Distillation-Ready Potential Shaping**: When refining policies for downstream model distillation or multi-task transfer, replace discontinuous impulse rewards with smooth potential-based continuous gradients. Dense spatial potentials prevent spiky policy distributions, ensuring high-fidelity logit transfer into compact student networks.
 
+17. **Visual Hazard Grounding & Threat-Aware Observation**:
+   - **Geometric Parity with Real-World Vision**: Any visual or spatial dimension detectable by production object-detection pipelines (e.g. YOLO Bounding Box width/height $w, h$, normalized radius $r/r_{\max}$, class ID) MUST be explicitly projected into the simulation observation tensor. Never artificially blind the agent to geometric threat sizes that real vision models trivially extract.
+   - **Damage-Proportional Penalty**: For environments featuring tiered hazard threats (e.g. small, medium, large debris), never apply flat, damage-agnostic hit penalties. Scale hit penalties directly proportional to true inflicted damage ($r_{\text{hit}} \propto -\text{total\_dmg}$) so the agent learns appropriate safety margins rather than reckless damage absorption.
+   - **Overhead High-Threat Repulsion Potential**: When large, high-threat hazards approach the player's vertical corridor, introduce smooth Markovian Gaussian repulsion potentials ($\phi_{\text{repel}}$) to shape lateral evasive maneuvering before catastrophic collision occurs.
+
+18. **Synthetic Auto-Labeling for Vision-RL Synergy**:
+   - **Simulator-Driven Auto-Labeling**: Leverage exact, deterministic spatial ground-truth arrays in `EnvState` to automatically export thousands of pixel-perfect YOLO-format annotations (`class_id center_x center_y w h`) directly from simulation rollouts, eliminating manual human labeling bottlenecks.
+   - **Multi-Account Cloud Co-Training**: Exploit the multi-account cloud burst pool to train JAX RL policies (`account_1`) and vision object-detection networks (`account_2`) simultaneously without cross-process resource starvation or session preemption conflicts.

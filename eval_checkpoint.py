@@ -23,7 +23,7 @@ def evaluate_checkpoint(checkpoint_path: str, num_episodes: int = 10, eval_steps
     wrapped = FlattenObservationWrapper(env)
     network = ActorCritic(action_dim=7)
 
-    obs_dim = 142 if params.is_remastered else 130
+    obs_dim = 172 if params.is_remastered else 130
     dummy_obs = jnp.zeros((1, obs_dim), dtype=jnp.float32)
     dummy_params = network.init(jax.random.PRNGKey(0), dummy_obs)
 
