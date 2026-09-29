@@ -97,6 +97,9 @@ class EnvParams:
     r_tap_dodge_bonus: float = 0.25
     debris_repel_scale: float = -0.30
 
+    # Curriculum Mode: Pure Evasion Mastery (Zero-Attacking, Survival-Only Focus)
+    evasion_only: bool = flax.struct.field(pytree_node=False, default=False)
+
     # -----------------------------------------------------------------------
     # Convenience properties for PROJECT.md / schema.py contract compatibility
     # -----------------------------------------------------------------------
@@ -620,13 +623,21 @@ def _compute_reward(
         0.0,
     )
 
+    # --- Evasion-Only Curriculum Mode Gating ---
+    effective_base = jnp.where(params.evasion_only, 0.10, r_base)
+    effective_boss_hit = jnp.where(params.evasion_only, 0.0, r_boss_hit)
+    effective_shield = jnp.where(params.evasion_only, 0.0, r_shield)
+    effective_bait = jnp.where(params.evasion_only, 0.0, r_bait)
+    effective_wall = jnp.where(params.evasion_only, 0.0, r_wall)
+    effective_dodge = jnp.where(params.evasion_only, 0.40 * phi_dodge, r_dodge)
+
     return (
-        r_base + r_hit + r_death + r_hp
+        effective_base + r_hit + r_death + r_hp
         + r_action_jump + r_jitter
         + r_airborne_hazard + r_tap_dodge
-        + r_boss_hit + r_shield + r_self_laser
+        + effective_boss_hit + effective_shield + r_self_laser
         + r_overload + r_gauge + r_safe_zone
-        + r_wall + r_bait + r_dodge + r_debris_repel
+        + effective_wall + effective_bait + effective_dodge + r_debris_repel
     )
 
 

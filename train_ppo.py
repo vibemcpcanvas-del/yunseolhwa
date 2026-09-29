@@ -86,9 +86,9 @@ class PPOConfig:
     resume_from: Optional[str] = None
     allow_precision_loss: bool = False
     checkpoint_interval_seconds: float = 600.0  # Time-based save interval (seconds, default 10 min)
-    chunk_size: int = 200  # Number of updates per JIT scan chunk
     plateau_patience: int = 15  # Plateau patience counter
     require_gpu: bool = False
+    evasion_only: bool = False  # Curriculum Mode: Pure Evasion Mastery (Zero-Attacking)
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +250,7 @@ def make_train_step(
 ]:
     """Decouples initialization and chunked update scan for outer Python loop checkpointing."""
     env = LotusPhase1Env()
-    env_params = EnvParams(mode=config.mode)
+    env_params = EnvParams(mode=config.mode, evasion_only=config.evasion_only)
     env = FlattenObservationWrapper(env)
     env = LogWrapper(env)
 
@@ -595,7 +595,7 @@ def evaluate_policy(
         rng = jax.random.PRNGKey(config.seed + 1000)
 
     env = LotusPhase1Env()
-    env_params = EnvParams(mode=config.mode)
+    env_params = EnvParams(mode=config.mode, evasion_only=config.evasion_only)
     wrapped = FlattenObservationWrapper(env)
 
     obs_dim = 172 if env_params.is_remastered else 130
@@ -689,6 +689,8 @@ def parse_args() -> PPOConfig:
                         help="Number of consecutive checks without improvement before early stopping")
     parser.add_argument("--require_gpu", action="store_true",
                         help="Raise error if JAX backend is not GPU")
+    parser.add_argument("--evasion_only", action="store_true",
+                        help="Curriculum Mode: Focus exclusively on survival and hazard evasion without boss attack")
 
     args = parser.parse_args()
 
@@ -719,6 +721,7 @@ def parse_args() -> PPOConfig:
         chunk_size=args.chunk_size,
         plateau_patience=args.plateau_patience,
         require_gpu=args.require_gpu,
+        evasion_only=args.evasion_only,
     )
 
 

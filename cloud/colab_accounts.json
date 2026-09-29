@@ -1,12 +1,12 @@
 {
-  "active_id": "account_1",
+  "active_id": "account_2",
   "accounts": [
     {
       "id": "account_1",
       "name": "구글 메인 계정",
-      "status": "READY",
-      "updated_at": "2026-09-29 13:29:56",
-      "last_error": null
+      "status": "QUOTA_EXHAUSTED",
+      "updated_at": "2026-09-29 20:59:16",
+      "last_error": "Quota exhausted"
     },
     {
       "id": "account_2",

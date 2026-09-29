@@ -70,6 +70,7 @@ parser.add_argument("--chunk_size", type=int, default=200, help="JIT scan chunk 
 parser.add_argument("--dtype", type=str, default="bfloat16", choices=["float32", "bfloat16", "float16"], help="Compute precision")
 parser.add_argument("--log_interval", type=int, default=20, help="Console logging interval")
 parser.add_argument("--require_gpu", action="store_true", help="Enforce GPU backend requirement")
+parser.add_argument("--evasion_only", action="store_true", help="Curriculum Mode: Train pure evasion and survival without attacking boss")
 parser.add_argument("--seed", type=int, default=42, help="PRNG seed")
 args, _ = parser.parse_known_args()
 
@@ -224,6 +225,8 @@ train_cmd = [
 
 if args.require_gpu:
     train_cmd.append("--require_gpu")
+if getattr(args, "evasion_only", False):
+    train_cmd.append("--evasion_only")
 
 resume_checkpoint_dir = os.path.join(WORKSPACE_DIR, "resume_checkpoint")
 resume_manifest = os.path.join(resume_checkpoint_dir, "_resume_state", "manifest.json")

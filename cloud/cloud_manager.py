@@ -184,7 +184,8 @@ class CloudJaxManager:
         accelerator: str = "gpu",
         tpu_type: str = "v5e1",
         gpu_type: str = "T4",
-        dtype: str = "float16"
+        dtype: str = "float16",
+        evasion_only: bool = False
     ) -> bool:
         """Executes full training pipeline on Colab with auto-rotation."""
         # Auto-configure num_envs to 16,384 by default
@@ -236,6 +237,8 @@ class CloudJaxManager:
         extra_remote_args = ["--log_interval", "20"]
         if accelerator == "gpu":
             extra_remote_args.append("--require_gpu")
+        if evasion_only:
+            extra_remote_args.append("--evasion_only")
 
         wsl_script = to_wsl_path(TRAIN_JOB_SCRIPT)
         cmd = [
@@ -368,6 +371,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="PRNG seed")
     parser.add_argument("--resume_latest", action="store_true", default=True, help="Auto-resume from latest verified checkpoint")
     parser.add_argument("--no_resume", action="store_true", help="Start training fresh without loading previous checkpoint")
+    parser.add_argument("--evasion_only", action="store_true", help="Curriculum Mode: Train pure evasion and survival without attacking boss")
     args = parser.parse_args()
 
     mgr = CloudJaxManager()
@@ -388,7 +392,8 @@ def main():
         accelerator=args.accelerator,
         tpu_type="v5e1",
         gpu_type=args.gpu_type,
-        dtype=args.dtype
+        dtype=args.dtype,
+        evasion_only=args.evasion_only
     )
     if not ok:
         sys.exit(1)
