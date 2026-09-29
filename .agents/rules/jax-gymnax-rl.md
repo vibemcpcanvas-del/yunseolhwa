@@ -89,3 +89,13 @@ When implementing or modifying JAX-accelerated simulation environments:
    - **Plateau & Policy Collapse Watchdog**: Open-ended/limitless training runs must continuously evaluate policy entropy (`entropy < 0.03` triggers early stop on policy collapse) and return gains across high-survival plateaus, gracefully terminating when training becomes mathematically meaningless.
    - **Legacy Package Transitive Dependency Parity**: When installing isolated packages with `--no-deps` (e.g. `gymnax`), all required upstream dependencies (`gymnasium`, `flax`, `optax`) must be explicitly declared in base installation manifests.
 
+16. **Mode-Specific Hazard Isolation & Truthful Metric Telemetry**:
+   - **Mode-Grounded Hazard Reporting**: In multi-mode simulation environments (e.g. Classic vs Remastered), evaluation metrics and user reports MUST strictly evaluate ONLY the hazards actively enabled in that specific mode.
+   - **No Phantom Evasion Claims**: Never attribute 0-damage counts or claim policy mastery for hazards that are disabled, bypassed, or non-existent in the active mode (`params.mode != MODE_REMASTERED`).
+   - **Gimmick-Specific Diagnostic Isolation**: For complex multi-stage mechanics (e.g. Remastered Lotus Tracking Laser), telemetry MUST decouple:
+     1. Gimmick Trigger/Redirection Success (`laser_hits_boss`)
+     2. Self-Damage / Friendly Fire (`laser_hits_player`)
+     3. Clean Evasion (`laser_hits_boss & ~laser_hits_player`)
+     Never report a gimmick as "successfully solved" if the agent is achieving it through suicidal self-damage (dirty baiting) that prevents episode completion.
+   - **Distillation-Ready Potential Shaping**: When refining policies for downstream model distillation or multi-task transfer, replace discontinuous impulse rewards with smooth potential-based continuous gradients. Dense spatial potentials prevent spiky policy distributions, ensuring high-fidelity logit transfer into compact student networks.
+

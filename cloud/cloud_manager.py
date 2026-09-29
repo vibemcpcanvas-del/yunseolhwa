@@ -108,16 +108,10 @@ class CloudJaxManager:
         except Exception:
             pass
 
-    def get_verified_resume_dir(self, mode: int) -> Optional[str]:
-        """Locates the latest verified checkpoint directory on the host workstation."""
-        candidates = []
-        if self.last_verified_step > 0:
-            candidates.extend([
-                os.path.join(PROJECT_ROOT, "checkpoints", f"mode_{mode}", f"step_{self.last_verified_step}"),
-                os.path.join(PROJECT_ROOT, "checkpoints", f"step_{self.last_verified_step}"),
-            ])
-
+    def find_latest_verified_step(self, mode: int) -> int:
+        """Scans checkpoints directory for the latest checkpoint with a valid resume manifest."""
         ckpt_root = os.path.join(PROJECT_ROOT, "checkpoints")
+        best_step = 0
         if os.path.exists(ckpt_root):
             for root, dirs, files in os.walk(ckpt_root):
                 if "manifest.json" in files and os.path.basename(root) == "_resume_state":
@@ -126,30 +120,21 @@ class CloudJaxManager:
                     if dir_name.startswith("step_"):
                         try:
                             s = int(dir_name.split("_")[1])
-                            candidates.append((s, step_dir))
+                            best_step = max(best_step, s)
                         except Exception:
                             pass
+        return best_step
 
-        if candidates:
-            valid_candidates = []
-            for item in candidates:
-                if isinstance(item, tuple):
-                    s, p = item
-                else:
-                    p = item
-                    try:
-                        s = int(os.path.basename(p).split("_")[1])
-                    except Exception:
-                        s = 0
-                manifest = os.path.join(p, "_resume_state", "manifest.json")
-                if os.path.exists(manifest):
-                    valid_candidates.append((s, p))
-
-            if valid_candidates:
-                valid_candidates.sort(key=lambda x: x[0], reverse=True)
-                best_step, best_path = valid_candidates[0]
-                self.last_verified_step = best_step
-                return best_path
+    def get_verified_resume_dir(self, mode: int) -> Optional[str]:
+        """Locates the verified checkpoint directory on the host workstation."""
+        if self.last_verified_step <= 0:
+            return None
+        candidate_mode = os.path.join(PROJECT_ROOT, "checkpoints", f"mode_{mode}", f"step_{self.last_verified_step}")
+        candidate_flat = os.path.join(PROJECT_ROOT, "checkpoints", f"step_{self.last_verified_step}")
+        for candidate in [candidate_mode, candidate_flat]:
+            manifest = os.path.join(candidate, "_resume_state", "manifest.json")
+            if os.path.exists(manifest):
+                return candidate
         return None
 
     def _handle_signal(self, sig, frame):
@@ -276,6 +261,7 @@ class CloudJaxManager:
                                 text=True, encoding='utf-8', errors='replace', bufsize=1)
 
         quota_exhausted = False
+        training_completed = False
         try:
             for line in iter(proc.stdout.readline, ''):
                 clean = line.strip()
@@ -283,9 +269,14 @@ class CloudJaxManager:
                     continue
                 print(f"[colab-jax] {clean}", flush=True)
 
+                if any(msg in clean for msg in [
+                    "[Training Complete]", "Training completed successfully", "All updates completed"
+                ]):
+                    training_completed = True
+
                 # Avoid false positives from training metric values like -503.79
                 is_training_metric = "[Update" in clean
-                if not is_training_metric and any(err in clean for err in [
+                if not is_training_metric and not training_completed and any(err in clean for err in [
                     "Quota exceeded", "Rate limit", "ResourceExhausted",
                     "Subscription required", "pro subscription",
                     "cannot assign", "unsupported accelerator",
@@ -307,6 +298,10 @@ class CloudJaxManager:
 
             if not quota_exhausted:
                 proc.wait()
+                if training_completed or self.last_verified_step >= num_updates:
+                    print("\n[SUCCESS] Colab training run completed successfully!", flush=True)
+                    return True
+
                 # Check if session ended before completing all target updates
                 if self.tunnel_manager:
                     last_step = self.tunnel_manager.get_last_verified_step()
@@ -371,9 +366,16 @@ def main():
     parser.add_argument("--chunk_size", type=int, default=200, help="JIT scan chunk size")
     parser.add_argument("--dtype", type=str, default="float16", choices=["float32", "bfloat16", "float16"], help="Compute precision")
     parser.add_argument("--seed", type=int, default=42, help="PRNG seed")
+    parser.add_argument("--resume_latest", action="store_true", default=True, help="Auto-resume from latest verified checkpoint")
+    parser.add_argument("--no_resume", action="store_true", help="Start training fresh without loading previous checkpoint")
     args = parser.parse_args()
 
     mgr = CloudJaxManager()
+    if not args.no_resume and args.resume_latest:
+        latest = mgr.find_latest_verified_step(args.mode)
+        if latest > 0:
+            mgr.last_verified_step = latest
+            print(f"[RESUME] Found verified checkpoint step_{latest} for initial load.", flush=True)
     ok = mgr.run_training(
         mode=args.mode,
         num_envs=args.num_envs,
